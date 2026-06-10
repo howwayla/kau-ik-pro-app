@@ -65,7 +65,7 @@ export function setMarketSource(body: {
     api_key?: string;
     provider?: 'mock' | 'fugle';
 }) {
-    return apiPost<{ provider: 'mock' | 'fugle' }>(
+    return apiPost<{ provider: 'mock' | 'fugle'; warning?: string }>(
         '/api/v1/config/market',
         body,
     );

@@ -57,6 +57,31 @@ import {
 const QUOTE_TTL_MS = 10_000;
 const OPT_QUOTE_TTL_MS = 60_000;
 const TICKERS_TTL_MS = 10 * 60_000;
+const WS_CONNECT_TIMEOUT_MS = 10_000;
+const REST_TIMEOUT_MS = 10_000;
+
+// the SDK's ws.connect() promise only settles on (un)authenticated events —
+// network errors, closes, and unexpected auth replies leave it pending
+// forever, so every await on it must be bounded
+function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(msg)), ms);
+        p.then(
+            (v) => {
+                clearTimeout(timer);
+                resolve(v);
+            },
+            (err) => {
+                clearTimeout(timer);
+                reject(
+                    err instanceof Error
+                        ? err
+                        : new Error(`${msg}: ${JSON.stringify(err).slice(0, 200)}`),
+                );
+            },
+        );
+    });
+}
 
 interface CacheEntry {
     state: DayState;
@@ -82,6 +107,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     private tickCbs: ((ch: TickChannel, t: SseTick) => void)[] = [];
     private bidaskCbs: ((ch: BidAskChannel, b: SseBidAsk) => void)[] = [];
     private disposed = false;
+    private wsFailedUntil = 0; // fail fast instead of re-timing-out per subscribe
 
     constructor(private apiKey: string) {}
 
@@ -90,7 +116,11 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         this.sdk = await import('@fugle/marketdata');
         this.rest = new this.sdk.RestClient({ apiKey: this.apiKey });
         // validate the key with a cheap call
-        const probe = await this.rest.stock.intraday.quote({ symbol: '2330' });
+        const probe: any = await withTimeout<any>(
+            this.rest.stock.intraday.quote({ symbol: '2330' }),
+            REST_TIMEOUT_MS,
+            'Fugle REST API 連線逾時',
+        );
         if (!probe || probe.statusCode === 401 || probe.status === 401) {
             throw new Error('Fugle API Key 無效（401）');
         }
@@ -125,6 +155,9 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     private async ensureWs(kind: 'stock' | 'futopt'): Promise<any> {
         const existing = kind === 'stock' ? this.stockWs : this.futoptWs;
         if (existing) return existing;
+        if (Date.now() < this.wsFailedUntil) {
+            throw new Error('Fugle WebSocket 暫時不可用（稍後自動重試）');
+        }
         const client = new this.sdk.WebSocketClient({ apiKey: this.apiKey });
         const ws = kind === 'stock' ? client.stock : client.futopt;
         ws.on('message', (raw: any) => {
@@ -143,10 +176,35 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 setTimeout(() => void this.resubscribe(kind), 3000);
             }
         });
-        await ws.connect();
+        try {
+            await withTimeout(
+                ws.connect(),
+                WS_CONNECT_TIMEOUT_MS,
+                'Fugle WebSocket 認證逾時（方案可能未含即時行情，或網路被阻擋）',
+            );
+        } catch (err) {
+            this.wsFailedUntil = Date.now() + 60_000;
+            try {
+                ws.disconnect?.();
+            } catch {
+                /* socket may not exist */
+            }
+            throw err;
+        }
+        this.wsFailedUntil = 0;
         if (kind === 'stock') this.stockWs = ws;
         else this.futoptWs = ws;
         return ws;
+    }
+
+    /** probe WS availability once; lets callers degrade to REST-only mode */
+    async probeWebSocket(): Promise<string | null> {
+        try {
+            await this.ensureWs('stock');
+            return null;
+        } catch (err) {
+            return err instanceof Error ? err.message : String(err);
+        }
     }
 
     private async resubscribe(kind: 'stock' | 'futopt'): Promise<void> {

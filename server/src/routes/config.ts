@@ -45,9 +45,19 @@ export function registerConfigRoutes(
                     detail: err instanceof Error ? err.message : String(err),
                 });
             }
+            // WS auth can hang/fail independently of REST (plan tier,
+            // network) — probe once so we can degrade to REST-only polling
+            const wsError = await fugle.probeWebSocket();
             await ctx.market.swap(fugle, 'fugle');
             ctx.runtimeConfig.set({ marketProvider: 'fugle', fugleApiKey: key });
-            return { provider: 'fugle' as const };
+            return {
+                provider: 'fugle' as const,
+                ...(wsError
+                    ? {
+                          warning: `WebSocket 即時推送不可用（${wsError}）— 已降級為 REST 輪詢模式，報價約每 10 秒更新`,
+                      }
+                    : {}),
+            };
         },
     );
 }

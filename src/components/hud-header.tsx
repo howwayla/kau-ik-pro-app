@@ -164,9 +164,15 @@ function MarketSourceMenu() {
         setBusy(true);
         setError('');
         try {
-            await setMarketSource(
+            const res = await setMarketSource(
                 key.trim() ? { api_key: key.trim() } : { provider: 'fugle' },
             );
+            if (res.warning) {
+                // show the degraded-mode warning before reloading
+                setError(`⚠ ${res.warning}（5 秒後重新整理）`);
+                setTimeout(() => window.location.reload(), 5000);
+                return;
+            }
             // charts/contract caches hold old-provider data — full reload
             window.location.reload();
         } catch (e) {
