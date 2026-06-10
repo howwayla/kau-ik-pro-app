@@ -1,12 +1,13 @@
 // src/lib/trade.ts — one-shot order helper + in-app notification channel
 
+import { getCapabilities } from './capabilities';
 import { checkOrderAllowed } from './risk';
 import {
     cancelOrder,
     fetchTrades,
     placeFuturesOrder,
     placeStockOrder,
-} from './shioaji';
+} from './backend';
 import type { ContractBase } from './types/contract';
 import { ACTIVE_ORDER_STATUSES, type Action, type Trade } from './types/order';
 
@@ -58,6 +59,9 @@ async function sendOrder(
     quantity: number,
     market: boolean,
 ): Promise<Trade> {
+    if (isFuturesContract(contract) && !getCapabilities().futures_trading) {
+        throw new Error('目前券商不支援期貨/選擇權下單（期權僅供行情顯示）');
+    }
     const trade = isFuturesContract(contract)
         ? await placeFuturesOrder(contract, {
               action,

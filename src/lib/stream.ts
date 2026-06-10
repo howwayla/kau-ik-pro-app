@@ -103,7 +103,7 @@ function ingestBidAsk(bidask: SseBidAsk) {
 }
 
 // registry of every quote subscription made this session — replayed after
-// the SSE connection recovers (covers shioaji-server restarts)
+// the SSE connection recovers (covers local-server restarts)
 const subscriptionRegistry = new Map<string, Record<string, unknown>>();
 
 export function registerSubscription(body: {

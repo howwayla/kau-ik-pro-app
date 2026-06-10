@@ -4,6 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuote } from '../hooks/use-stream';
+import { useCapabilities } from '../lib/capabilities';
 import { notify, placeQuickOrder } from '../lib/trade';
 import type { ContractInfo } from '../lib/types/contract';
 import type { Action } from '../lib/types/order';
@@ -15,6 +16,11 @@ const LEVELS = 14; // rows above + below center
 
 export function FlashOrder({ contract }: { contract: ContractInfo }) {
     const quote = useQuote(contract.code);
+    const caps = useCapabilities();
+    const futuresBlocked =
+        (contract.security_type === 'FUT' ||
+            contract.security_type === 'OPT') &&
+        !caps.futures_trading;
     const [qty, setQty] = useState(1);
     const [armed, setArmed] = useState(false);
     const [center, setCenter] = useState<number | null>(null);
@@ -91,6 +97,16 @@ export function FlashOrder({ contract }: { contract: ContractInfo }) {
     };
 
     const lastKey = last !== null ? last.toFixed(2) : '';
+
+    if (futuresBlocked) {
+        return (
+            <div className={styles.wrap}>
+                <div className={styles.controls}>
+                    目前券商不支援期貨/選擇權下單 — 僅供行情顯示
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={styles.wrap}>

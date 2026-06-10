@@ -1,4 +1,4 @@
-// src/lib/shioaji.ts
+// src/lib/backend.ts — REST client for the local nova-pro-server
 
 import { apiGet, apiPost, apiPut } from './api';
 import type {
@@ -38,6 +38,7 @@ export interface ServerInfo {
     description: string;
     protocols: string[];
     simulation: boolean;
+    capabilities?: { futures_trading: boolean };
 }
 
 function contractKey(c: ContractBase) {

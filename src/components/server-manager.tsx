@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { usePoll } from '../hooks/use-poll';
-import { fetchHealth } from '../lib/shioaji';
+import { fetchHealth } from '../lib/backend';
 import {
     isTauri,
     loadDesktopSettings,

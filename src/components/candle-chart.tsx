@@ -15,7 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuote } from '../hooks/use-stream';
 import { bollinger, ema, sma, vwap } from '../lib/indicators';
-import { cancelOrder, fetchKbars, updateOrderPrice } from '../lib/shioaji';
+import { cancelOrder, fetchKbars, updateOrderPrice } from '../lib/backend';
 import { setPickedPrice } from '../lib/price-sync';
 import { notify, placeQuickOrder } from '../lib/trade';
 import {

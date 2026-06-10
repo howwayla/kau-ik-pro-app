@@ -4,9 +4,10 @@
 // only run while the app is open (client-side engine).
 
 import { useSyncExternalStore } from 'react';
+import { getCapabilities } from './capabilities';
 import { ensureContract } from './contracts-cache';
 import { onAnyTick } from './stream';
-import { notify, placeQuickOrder } from './trade';
+import { isFuturesContract, notify, placeQuickOrder } from './trade';
 import type { Action } from './types/order';
 
 export interface TriggerOrder {
@@ -114,6 +115,16 @@ async function fire(t: TriggerOrder, lastPrice: number) {
     }
     try {
         const contract = await ensureContract(t.code);
+        if (isFuturesContract(contract) && !getCapabilities().futures_trading) {
+            // broker can't trade futures — downgrade to a price alert
+            notify({
+                kind: 'info',
+                title: '🔔 到價警示（無法自動下單）',
+                body: `${t.code} 現價 ${lastPrice} 已${t.condition === 'below' ? '跌破' : '突破'} ${t.price}，目前券商不支援期權下單`,
+            });
+            firing.delete(t.id);
+            return;
+        }
         const trade = await placeQuickOrder(contract, t.action, null, t.quantity, {
             bypassRisk: true, // protective exit — never blocked by kill switch
         });

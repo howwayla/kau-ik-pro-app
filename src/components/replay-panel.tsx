@@ -10,7 +10,7 @@ import {
     type UTCTimestamp,
 } from 'lightweight-charts';
 import { useEffect, useRef, useState } from 'react';
-import { fetchHistoryTicks } from '../lib/shioaji';
+import { fetchHistoryTicks } from '../lib/backend';
 import { getChartColors, useThemeSettings } from '../lib/theme-store';
 import type { ContractBase } from '../lib/types/contract';
 import { fmtInt, fmtPrice } from '../lib/utils/format';

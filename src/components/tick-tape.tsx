@@ -3,7 +3,7 @@
 // Times show full microsecond precision (HH:MM:SS.ffffff).
 
 import { useEffect, useState } from 'react';
-import { fetchLastTicks } from '../lib/shioaji';
+import { fetchLastTicks } from '../lib/backend';
 import { onAnyTick } from '../lib/stream';
 import type { ContractBase } from '../lib/types/contract';
 import type { HistoryTicks } from '../lib/types/tick';

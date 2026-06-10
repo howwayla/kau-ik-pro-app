@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ensureContract } from '../lib/contracts-cache';
-import { cancelOrder, updateOrderQty } from '../lib/shioaji';
+import { cancelOrder, updateOrderQty } from '../lib/backend';
 import { notify, placeQuickOrder } from '../lib/trade';
 import type { Trade } from '../lib/types/order';
 import type {

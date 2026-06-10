@@ -10,7 +10,7 @@ import {
     fetchWatchlists,
     subscribeQuote,
     syncWatchlist,
-} from '../lib/shioaji';
+} from '../lib/backend';
 import { registerCodeAlias } from '../lib/stream';
 import type { ContractInfo, SecurityType } from '../lib/types/contract';
 import type { Snapshot } from '../lib/types/market';
@@ -30,7 +30,7 @@ const DEFAULT_SYMBOLS: { code: string; type: SecurityType }[] = [
 ];
 
 const STORAGE_KEY = 'sj-pro-watchlist';
-const SERVER_LIST_NAME = 'shioaji-pro-v2';
+const SERVER_LIST_NAME = 'nova-pro-v1';
 
 function loadSaved(): { code: string; type: SecurityType }[] {
     try {

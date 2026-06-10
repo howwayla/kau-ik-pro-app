@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { usePoll } from '../hooks/use-poll';
 import { useQuote } from '../hooks/use-stream';
-import { fetchSnapshots } from '../lib/shioaji';
+import { fetchSnapshots } from '../lib/backend';
 import type { Snapshot } from '../lib/types/market';
 import { fmtPct, fmtPrice, fmtSigned } from '../lib/utils/format';
 import * as panel from './panel.css';

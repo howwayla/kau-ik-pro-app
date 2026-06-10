@@ -2,7 +2,7 @@
 // Aggregates today's history ticks once, then accumulates live ticks.
 
 import { useEffect, useMemo, useState } from 'react';
-import { fetchHistoryTicks } from '../lib/shioaji';
+import { fetchHistoryTicks } from '../lib/backend';
 import { onAnyTick } from '../lib/stream';
 import type { ContractBase } from '../lib/types/contract';
 import { fmtInt, fmtPrice } from '../lib/utils/format';

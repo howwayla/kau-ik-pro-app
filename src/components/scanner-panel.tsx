@@ -1,7 +1,7 @@
 // src/components/scanner-panel.tsx — market movers leaderboard
 
 import { useEffect, useState } from 'react';
-import { fetchScanner } from '../lib/shioaji';
+import { fetchScanner } from '../lib/backend';
 import type { ScannerItem, ScannerType } from '../lib/types/market';
 import { fmtPct, fmtPrice } from '../lib/utils/format';
 import * as panel from './panel.css';

@@ -7,7 +7,8 @@ import {
     setRiskSettings,
     useRiskSettings,
 } from '../lib/risk';
-import { fetchHealth, fetchInfo } from '../lib/shioaji';
+import { fetchHealth, fetchInfo } from '../lib/backend';
+import { setCapabilities } from '../lib/capabilities';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
     setThemeSettings,
@@ -384,6 +385,7 @@ export function HudHeader({
             .then((info) => {
                 setSimulation(info.simulation);
                 setVersion(info.version);
+                setCapabilities(info.capabilities);
             })
             .catch(() => setSimulation(null));
         fetchHealth()
@@ -396,7 +398,7 @@ export function HudHeader({
     return (
         <header className={styles.header}>
             <div className={styles.logoBlock}>
-                <span className={styles.logoMain}>Shioaji Pro</span>
+                <span className={styles.logoMain}>Nova Pro</span>
                 <span className={styles.logoSub}>
                     交易終端 {version && `v${version}`}
                 </span>

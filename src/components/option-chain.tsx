@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuote } from '../hooks/use-stream';
 import { apiPost } from '../lib/api';
-import { fetchSnapshots } from '../lib/shioaji';
+import { fetchSnapshots } from '../lib/backend';
 import type { Snapshot } from '../lib/types/market';
 import { fmtPrice, fmtSigned } from '../lib/utils/format';
 import * as dock from './bottom-dock.css';

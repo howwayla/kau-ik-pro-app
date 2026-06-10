@@ -5,9 +5,10 @@ import { useEffect, useRef, useState } from 'react';
 import { TICKET_ACTION_EVENT } from '../hooks/use-hotkeys';
 import { useQuote } from '../hooks/use-stream';
 import { registerBracket } from '../lib/bracket';
+import { useCapabilities } from '../lib/capabilities';
 import { usePickedPrice } from '../lib/price-sync';
 import { checkOrderAllowed } from '../lib/risk';
-import { placeFuturesOrder, placeStockOrder } from '../lib/shioaji';
+import { placeFuturesOrder, placeStockOrder } from '../lib/backend';
 import type { ContractInfo } from '../lib/types/contract';
 import type {
     Action,
@@ -28,6 +29,8 @@ export function OrderTicket({
 }) {
     const isFutures =
         contract.security_type === 'FUT' || contract.security_type === 'OPT';
+    const caps = useCapabilities();
+    const futuresBlocked = isFutures && !caps.futures_trading;
     const quote = useQuote(contract.code);
 
     const [action, setAction] = useState<Action>('Buy');
@@ -156,6 +159,16 @@ export function OrderTicket({
     };
 
     const qtyUnit = isFutures ? '口' : orderLot === 'IntradayOdd' ? '股' : '張';
+
+    if (futuresBlocked) {
+        return (
+            <div className={styles.body}>
+                <div className={`${styles.feedback} ${panel.dirText.up}`}>
+                    目前券商不支援期貨/選擇權下單 — 期權商品僅供行情顯示
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={styles.body}>

@@ -3,7 +3,7 @@
 // its quote streams once, and exposes a useSyncExternalStore hook.
 
 import { useSyncExternalStore } from 'react';
-import { fetchContract, subscribeQuote } from './shioaji';
+import { fetchContract, subscribeQuote } from './backend';
 import { registerCodeAlias } from './stream';
 import type { ContractInfo, SecurityType } from './types/contract';
 

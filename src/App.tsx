@@ -1,4 +1,4 @@
-// src/App.tsx — Shioaji Pro trading terminal
+// src/App.tsx — Nova Pro trading terminal
 // Dynamic panel blocks on a draggable grid, with named layout profiles.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -41,7 +41,7 @@ import {
     fetchMargin,
     fetchPositions,
     fetchTrades,
-} from './lib/shioaji';
+} from './lib/backend';
 import { notify } from './lib/trade';
 import type { ContractInfo } from './lib/types/contract';
 import type { Trade } from './lib/types/order';
@@ -600,7 +600,7 @@ export default function App() {
             <div className={grid.gridWrap} ref={containerRef}>
                 {booting && (
                     <div className={styles.loading}>
-                        <span>Shioaji Pro</span>
+                        <span>Nova Pro</span>
                         <span style={{ fontSize: '0.7rem' }}>
                             載入交易終端…
                         </span>
