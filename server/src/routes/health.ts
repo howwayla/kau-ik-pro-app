@@ -26,7 +26,7 @@ export function registerHealthRoutes(
         protocols: ['http', 'sse'],
         simulation:
             ctx.config.tradeProvider === 'mock' ||
-            ctx.config.marketProvider === 'mock',
+            ctx.market.name() === 'mock',
         capabilities: {
             futures_trading: ctx.trading.capabilities().futures,
         },

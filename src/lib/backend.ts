@@ -49,6 +49,28 @@ function contractKey(c: ContractBase) {
     };
 }
 
+// ---- market source config ----
+
+export interface MarketConfig {
+    provider: 'mock' | 'fugle';
+    has_key: boolean;
+}
+
+export function fetchMarketConfig() {
+    return apiGet<MarketConfig>('/api/v1/config/market');
+}
+
+/** validate + save a Fugle API key and hot-swap the market provider */
+export function setMarketSource(body: {
+    api_key?: string;
+    provider?: 'mock' | 'fugle';
+}) {
+    return apiPost<{ provider: 'mock' | 'fugle' }>(
+        '/api/v1/config/market',
+        body,
+    );
+}
+
 // ---- health / info / auth ----
 
 export function fetchHealth() {

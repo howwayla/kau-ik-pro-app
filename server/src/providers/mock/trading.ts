@@ -18,13 +18,14 @@ import type {
     Trade,
 } from '../../types/dto.ts';
 import type { ContractKey } from '../market-data.ts';
+import type { PriceFeed } from '../manager.ts';
 import {
     TradeNotFoundError,
     zeroMargin,
     type TradingProvider,
 } from '../trading.ts';
 import { hashStr, mulberry32 } from './prng.ts';
-import { dateStr, type MockMarketEngine } from './random-walk.ts';
+import { dateStr } from './random-walk.ts';
 
 const INITIAL_CASH = 10_000_000;
 const INITIAL_FUT_EQUITY = 2_000_000;
@@ -33,6 +34,13 @@ function marginPerLot(code: string): number {
     if (code.startsWith('MXF')) return 46_000;
     if (code.startsWith('TXO')) return 0; // buyer pays premium only (mock)
     return 184_000;
+}
+
+function futMultiplier(code: string): number {
+    if (code.startsWith('TXO')) return 50;
+    if (code.startsWith('MXF')) return 50;
+    if (code.startsWith('TMF')) return 10;
+    return 200;
 }
 
 interface OpenOrder {
@@ -62,10 +70,10 @@ export class MockTradingProvider implements TradingProvider {
     private seq = 0;
     private eventCbs: ((ev: OrderEventData) => void)[] = [];
 
-    constructor(private engine: MockMarketEngine) {}
+    constructor(private feed: PriceFeed) {}
 
     async init(): Promise<void> {
-        this.engine.onPrice((code, price) => this.checkLimitFills(code, price));
+        this.feed.onPrice((code, price) => this.checkLimitFills(code, price));
     }
 
     capabilities() {
@@ -113,14 +121,13 @@ export class MockTradingProvider implements TradingProvider {
     ): Trade {
         this.seq += 1;
         const id = randomUUID();
-        const inst = this.engine.getInstrument(key.code);
         return {
             contract: {
                 exchange: (key.exchange ?? 'TSE') as Trade['contract']['exchange'],
                 code: key.code,
                 security_type: key.security_type,
                 target_code: null,
-                name: inst?.name,
+                name: this.feed.displayName(key.code),
             },
             order: {
                 id,
@@ -178,30 +185,52 @@ export class MockTradingProvider implements TradingProvider {
     }
 
     private tryImmediateFill(open: OpenOrder): void {
-        const last = this.engine.lastPrice(open.key.code);
         if (open.limitPrice === null) {
-            setTimeout(() => this.fill(open, this.engine.lastPrice(open.key.code)), 200);
+            setTimeout(() => void this.fillAtMarket(open), 200);
             return;
         }
+        const last = this.feed.lastPrice(open.key.code);
         const { action } = open.trade.order;
         const crossed =
-            action === 'Buy' ? last <= open.limitPrice : last >= open.limitPrice;
+            last !== undefined &&
+            (action === 'Buy' ? last <= open.limitPrice : last >= open.limitPrice);
         if (crossed) {
             setTimeout(() => this.fill(open, open.limitPrice!), 200);
         } else {
-            // keep the instrument walking so the resting order can fill
-            this.engine.acquireWalk(open.key.code);
+            // keep prices flowing so the resting order can fill on a cross
+            this.feed.hold(open.key);
             open.walkHeld = true;
         }
+    }
+
+    private async fillAtMarket(open: OpenOrder): Promise<void> {
+        const price =
+            this.feed.lastPrice(open.key.code) ??
+            (await this.feed.fetchPrice(open.key));
+        if (!price || price <= 0) {
+            open.trade.status.status = 'Failed';
+            open.trade.status.msg = '無法取得市價（盤前或無行情資料）';
+            this.emit({
+                operation: {
+                    op_type: 'New',
+                    op_code: '99',
+                    op_msg: open.trade.status.msg,
+                },
+                order: this.eventOrder(open),
+                contract: { code: open.key.code },
+                status: { status: 'Failed' },
+            });
+            return;
+        }
+        this.fill(open, price);
     }
 
     private checkLimitFills(code: string, price: number): void {
         for (const open of this.orders.values()) {
             if (open.limitPrice === null) continue;
             if (open.trade.status.status !== 'Submitted') continue;
-            const inst = this.engine.getInstrument(open.key.code);
-            const resolved = inst?.target_code ?? open.key.code;
-            if (resolved !== code && open.key.code !== code) continue;
+            const target = this.feed.aliasTarget(open.key.code);
+            if (open.key.code !== code && target !== code) continue;
             const { action } = open.trade.order;
             const crossed =
                 action === 'Buy'
@@ -214,7 +243,7 @@ export class MockTradingProvider implements TradingProvider {
     private releaseWalk(open: OpenOrder): void {
         if (open.walkHeld) {
             open.walkHeld = false;
-            this.engine.releaseWalk(open.key.code);
+            this.feed.release(open.key);
         }
     }
 
@@ -282,8 +311,7 @@ export class MockTradingProvider implements TradingProvider {
             if (pos.quantity === 0) this.stockLedger.delete(code);
             else this.stockLedger.set(code, pos);
         } else {
-            const inst = this.engine.getInstrument(code);
-            const mult = inst?.multiplier ?? 200;
+            const mult = futMultiplier(code);
             const pos = this.futLedger.get(code) ?? {
                 code,
                 quantity: 0,
@@ -395,10 +423,10 @@ export class MockTradingProvider implements TradingProvider {
                 contract: { code: open.key.code },
                 status: { status: open.trade.status.status },
             });
-            this.checkLimitFills(
-                open.key.code,
-                this.engine.lastPrice(open.key.code),
-            );
+            const last = this.feed.lastPrice(open.key.code);
+            if (last !== undefined) {
+                this.checkLimitFills(open.key.code, last);
+            }
         }
         return open.trade;
     }
@@ -429,7 +457,7 @@ export class MockTradingProvider implements TradingProvider {
     async positions(accountType: AccountTypeName): Promise<Position[]> {
         if (accountType === 'S') {
             return [...this.stockLedger.values()].map((pos, i) => {
-                const last = this.engine.lastPrice(pos.code);
+                const last = this.feed.lastPrice(pos.code) ?? pos.avgPrice;
                 return {
                     id: i,
                     code: pos.code,
@@ -443,9 +471,8 @@ export class MockTradingProvider implements TradingProvider {
             });
         }
         return [...this.futLedger.values()].map((pos, i) => {
-            const last = this.engine.lastPrice(pos.code);
-            const inst = this.engine.getInstrument(pos.code);
-            const mult = inst?.multiplier ?? 200;
+            const last = this.feed.lastPrice(pos.code) ?? pos.avgPrice;
+            const mult = futMultiplier(pos.code);
             const dir = Math.sign(pos.quantity);
             return {
                 id: i,
@@ -474,9 +501,8 @@ export class MockTradingProvider implements TradingProvider {
         let unrealized = 0;
         let openLots = 0;
         for (const pos of this.futLedger.values()) {
-            const inst = this.engine.getInstrument(pos.code);
-            const mult = inst?.multiplier ?? 200;
-            const last = this.engine.lastPrice(pos.code);
+            const mult = futMultiplier(pos.code);
+            const last = this.feed.lastPrice(pos.code) ?? pos.avgPrice;
             initialMargin += marginPerLot(pos.code) * Math.abs(pos.quantity);
             unrealized +=
                 (last - pos.avgPrice) * Math.abs(pos.quantity) * mult * Math.sign(pos.quantity);

@@ -120,6 +120,16 @@ export class MockMarketEngine {
         }
     }
 
+    dispose(): void {
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
+        this.walkRefs.clear();
+        this.tickSubs.clear();
+        this.bidaskSubs.clear();
+    }
+
     // ---- instrument lookup ----
 
     getInstrument(code: string): SeedInstrument | undefined {

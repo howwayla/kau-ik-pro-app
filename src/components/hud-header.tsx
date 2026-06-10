@@ -7,7 +7,13 @@ import {
     setRiskSettings,
     useRiskSettings,
 } from '../lib/risk';
-import { fetchHealth, fetchInfo } from '../lib/backend';
+import {
+    fetchHealth,
+    fetchInfo,
+    fetchMarketConfig,
+    setMarketSource,
+    type MarketConfig,
+} from '../lib/backend';
 import { setCapabilities } from '../lib/capabilities';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
@@ -135,6 +141,113 @@ function ThemeSettings() {
                     >
                         {sound ? '🔉 成交/警示音效開啟' : '🔇 音效關閉'}
                     </button>
+                </>
+            )}
+        </Menu>
+    );
+}
+
+function MarketSourceMenu() {
+    const [config, setConfig] = useState<MarketConfig | null>(null);
+    const [key, setKey] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        fetchMarketConfig()
+            .then(setConfig)
+            .catch(() => setConfig(null));
+    }, []);
+
+    const connectFugle = async () => {
+        if (busy) return;
+        setBusy(true);
+        setError('');
+        try {
+            await setMarketSource(
+                key.trim() ? { api_key: key.trim() } : { provider: 'fugle' },
+            );
+            // charts/contract caches hold old-provider data — full reload
+            window.location.reload();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            setBusy(false);
+        }
+    };
+
+    const backToMock = async () => {
+        if (busy) return;
+        setBusy(true);
+        setError('');
+        try {
+            await setMarketSource({ provider: 'mock' });
+            window.location.reload();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            setBusy(false);
+        }
+    };
+
+    const isFugle = config?.provider === 'fugle';
+    return (
+        <Menu label={isFugle ? '行情·富果' : '行情·模擬'}>
+            {() => (
+                <>
+                    <span className={styles.settingLabel}>
+                        行情來源 Market Data
+                    </span>
+                    <span className={styles.emptyHint}>
+                        目前：
+                        {isFugle
+                            ? '富果行情 API（真實報價）'
+                            : '內建模擬行情（隨機走動）'}
+                    </span>
+                    <span className={styles.settingLabel}>
+                        Fugle API Key
+                    </span>
+                    <div className={styles.saveRow}>
+                        <input
+                            className={styles.saveInput}
+                            type='password'
+                            value={key}
+                            placeholder={
+                                config?.has_key
+                                    ? '已儲存（輸入可更換）'
+                                    : '貼上你的 API Key'
+                            }
+                            onChange={(e) => setKey(e.target.value)}
+                        />
+                    </div>
+                    <button
+                        className={styles.opt[isFugle ? 'on' : 'off']}
+                        disabled={busy || (!key.trim() && !config?.has_key)}
+                        onClick={connectFugle}
+                    >
+                        {busy
+                            ? '驗證中…'
+                            : isFugle
+                              ? '↻ 重新連接富果行情'
+                              : '✓ 連接富果行情'}
+                    </button>
+                    {isFugle && (
+                        <button
+                            className={styles.opt.off}
+                            disabled={busy}
+                            onClick={backToMock}
+                        >
+                            切回模擬行情
+                        </button>
+                    )}
+                    {error && (
+                        <span className={`${styles.emptyHint} ${panel.dirText.up}`}>
+                            ✕ {error}
+                        </span>
+                    )}
+                    <span className={styles.emptyHint}>
+                        Key 申請：developer.fugle.tw（僅存於本機
+                        server/data/config.json）。注意：免費方案有 WebSocket
+                        訂閱數與 REST 速率上限，自選清單過多時部分報價可能不動。
+                    </span>
                 </>
             )}
         </Menu>
@@ -438,6 +551,7 @@ export function HudHeader({
                 open={serverMgrOpen}
                 onToggle={setServerMgrOpen}
             />
+            <MarketSourceMenu />
             <RiskMenu />
             <AddBlockMenu
                 addableTypes={addableTypes}

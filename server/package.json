@@ -9,6 +9,7 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
+        "@fugle/marketdata": "^1.4.2",
         "fastify": "^5.2.0",
         "tsx": "^4.19.0"
     },

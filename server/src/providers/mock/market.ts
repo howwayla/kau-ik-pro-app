@@ -195,4 +195,21 @@ export class MockMarketDataProvider implements MarketDataProvider {
     onBidAsk(cb: (channel: BidAskChannel, bidask: SseBidAsk) => void): void {
         this.engine.onBidAsk(cb);
     }
+
+    lastPrice(code: string): number | undefined {
+        if (!this.engine.getInstrument(code)) return undefined;
+        return this.engine.lastPrice(code);
+    }
+
+    displayName(code: string): string | undefined {
+        return this.engine.getInstrument(code)?.name;
+    }
+
+    aliasTarget(code: string): string | undefined {
+        return this.engine.getInstrument(code)?.target_code ?? undefined;
+    }
+
+    dispose(): void {
+        this.engine.dispose();
+    }
 }

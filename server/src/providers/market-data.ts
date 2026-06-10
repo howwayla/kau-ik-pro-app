@@ -58,6 +58,15 @@ export interface MarketDataProvider {
     unsubscribe(key: ContractKey, quote: StreamQuoteType): Promise<void>;
     onTick(cb: (channel: TickChannel, tick: SseTick) => void): void;
     onBidAsk(cb: (channel: BidAskChannel, bidask: SseBidAsk) => void): void;
+
+    /** last traded price from the live cache (used by paper trading) */
+    lastPrice(code: string): number | undefined;
+    /** display name from the contract cache, if known */
+    displayName(code: string): string | undefined;
+    /** continuous-month alias resolution (TXFR1 → actual contract code) */
+    aliasTarget(code: string): string | undefined;
+    /** release timers / sockets when the provider is swapped out */
+    dispose(): void;
 }
 
 export function tickChannelFor(key: ContractKey): TickChannel {
