@@ -330,7 +330,7 @@ function PopoutView({
 }
 
 export default function App() {
-    const { items, loading, addSymbol } = useWatchlist();
+    const { items, loading, addSymbol, removeSymbol } = useWatchlist();
     const [selected, setSelected] = useState<ContractInfo | null>(null);
     const [workspace, setWorkspace] = useState<Workspace>(loadWorkspace);
     const [profiles, setProfiles] = useState<Profile[]>(loadProfiles);
@@ -569,6 +569,7 @@ export default function App() {
         selectedCode: selected?.code ?? null,
         onSelect: setSelected,
         onAdd: addSymbol,
+        onRemove: removeSymbol,
     };
     const dockProps = {
         positions: positionsPoll.data ?? [],

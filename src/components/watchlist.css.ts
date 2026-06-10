@@ -9,6 +9,7 @@ export const list = style({
 });
 
 const rowBase = style({
+    position: 'relative',
     display: 'grid',
     gridTemplateColumns: '1fr auto',
     gridTemplateRows: 'auto auto',
@@ -70,9 +71,29 @@ export const flash = styleVariants({
     none: {},
 });
 
+// shown on row hover, floats over the change% cell
 export const removeBtn = style({
-    gridColumn: '1 / -1',
+    position: 'absolute',
+    right: 2,
+    top: 2,
     display: 'none',
+    background: vars.color.inset,
+    border: `1px solid ${vars.color.border}`,
+    borderRadius: vars.radius.sm,
+    color: vars.color.mutedForeground,
+    fontSize: '0.62rem',
+    lineHeight: 1,
+    padding: '2px 4px',
+    cursor: 'pointer',
+    selectors: {
+        [`${rowBase}:hover &`]: {
+            display: 'block',
+        },
+        '&:hover': {
+            color: vars.color.foreground,
+            borderColor: vars.color.accent,
+        },
+    },
 });
 
 export const addRow = style({

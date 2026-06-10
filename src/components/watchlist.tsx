@@ -12,10 +12,12 @@ function WatchRow({
     item,
     selected,
     onSelect,
+    onRemove,
 }: {
     item: WatchItem;
     selected: boolean;
     onSelect: (c: ContractInfo) => void;
+    onRemove: (code: string) => void;
 }) {
     const quote = useQuote(item.contract.code);
     const tick = quote?.tick;
@@ -52,6 +54,16 @@ function WatchRow({
             <span className={`${styles.change} ${panel.dirText[dir]}`}>
                 {fmtSigned(chg)} {fmtPct(pct)}
             </span>
+            <button
+                className={styles.removeBtn}
+                title={`移除 ${item.contract.code}`}
+                onClick={(e) => {
+                    e.stopPropagation(); // don't also select the row
+                    onRemove(item.contract.code);
+                }}
+            >
+                ✕
+            </button>
         </div>
     );
 }
@@ -61,11 +73,13 @@ export function Watchlist({
     selectedCode,
     onSelect,
     onAdd,
+    onRemove,
 }: {
     items: WatchItem[];
     selectedCode: string | null;
     onSelect: (c: ContractInfo) => void;
     onAdd: (code: string, type: SecurityType) => Promise<unknown>;
+    onRemove: (code: string) => void;
 }) {
     const [input, setInput] = useState('');
     const [type, setType] = useState<SecurityType>('STK');
@@ -95,6 +109,7 @@ export function Watchlist({
                             item={item}
                             selected={item.contract.code === selectedCode}
                             onSelect={onSelect}
+                            onRemove={onRemove}
                         />
                     ))}
                 </div>
