@@ -11,7 +11,7 @@ import {
 } from 'lightweight-charts';
 import { useEffect, useRef, useState } from 'react';
 import { fetchHistoryTicks } from '../lib/backend';
-import { getChartColors, useThemeSettings } from '../lib/theme-store';
+import { chartFontSize, getChartColors, useThemeSettings } from '../lib/theme-store';
 import type { ContractBase } from '../lib/types/contract';
 import { fmtInt, fmtPrice } from '../lib/utils/format';
 import { dateStrOffset, wallClockToUtc } from '../lib/utils/kbars';
@@ -54,7 +54,7 @@ export function ReplayPanel({ contract }: { contract: ContractBase }) {
                 background: { type: ColorType.Solid, color: 'transparent' },
                 textColor: c.text,
                 fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 10,
+                fontSize: chartFontSize(10),
                 attributionLogo: false,
             },
             grid: {

@@ -1,20 +1,25 @@
-// src/lib/theme-store.ts — theme settings (mode + price-color convention),
-// persisted to localStorage and applied as a class on <html>.
+// src/lib/theme-store.ts — theme settings (mode + price-color convention
+// + font scale), persisted to localStorage and applied on <html>.
 
 import { useSyncExternalStore } from 'react';
 import { themeClasses } from '../theme.css';
 
 export type ThemeMode = 'dark' | 'midnight' | 'light';
 export type Convention = 'tw' | 'intl';
+// every fontSize in the app is rem-based, so scaling the root font-size
+// scales all text without touching the panel layout
+export type FontScale = 90 | 100 | 110 | 125;
 
 export interface ThemeSettings {
     mode: ThemeMode;
     convention: Convention;
+    fontScale: FontScale;
 }
 
 const STORAGE_KEY = 'sj-pro-theme';
 const MODES: ThemeMode[] = ['dark', 'midnight', 'light'];
 const CONVENTIONS: Convention[] = ['tw', 'intl'];
+export const FONT_SCALES: FontScale[] = [90, 100, 110, 125];
 
 function load(): ThemeSettings {
     try {
@@ -25,13 +30,20 @@ function load(): ThemeSettings {
                 MODES.includes(s.mode as ThemeMode) &&
                 CONVENTIONS.includes(s.convention as Convention)
             ) {
-                return s as ThemeSettings;
+                return {
+                    mode: s.mode as ThemeMode,
+                    convention: s.convention as Convention,
+                    // settings saved before the font-scale feature lack it
+                    fontScale: FONT_SCALES.includes(s.fontScale as FontScale)
+                        ? (s.fontScale as FontScale)
+                        : 100,
+                };
             }
         }
     } catch {
         // corrupted settings — use defaults
     }
-    return { mode: 'dark', convention: 'tw' };
+    return { mode: 'dark', convention: 'tw', fontScale: 100 };
 }
 
 let settings: ThemeSettings = load();
@@ -45,6 +57,13 @@ function applyClass() {
     const key = `${settings.mode}-${settings.convention}`;
     const cls = themeClasses[key] ?? themeClasses['dark-tw'];
     if (cls) root.classList.add(cls);
+    root.style.fontSize =
+        settings.fontScale === 100 ? '' : `${settings.fontScale}%`;
+}
+
+/** canvas charts don't inherit CSS — scale their px font sizes manually */
+export function chartFontSize(base = 10): number {
+    return Math.round((base * settings.fontScale) / 100);
 }
 
 export function initTheme() {

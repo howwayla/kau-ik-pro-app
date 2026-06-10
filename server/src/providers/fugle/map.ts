@@ -66,11 +66,16 @@ export interface DayState {
 }
 
 export function dayStateFromQuote(q: any): DayState {
+    // pre-open the session has no trades yet: closePrice/lastPrice are
+    // null — show the previous close instead of 0
+    const last =
+        num(q?.closePrice ?? q?.lastPrice) ||
+        num(q?.previousClose ?? q?.referencePrice);
     return {
-        open: num(q?.openPrice),
-        high: num(q?.highPrice),
-        low: num(q?.lowPrice),
-        last: num(q?.closePrice ?? q?.lastPrice),
+        open: num(q?.openPrice) || last,
+        high: num(q?.highPrice) || last,
+        low: num(q?.lowPrice) || last,
+        last,
         avg: num(q?.avgPrice),
         totalVolume: num(q?.total?.tradeVolume),
         totalValue: num(q?.total?.tradeValue),

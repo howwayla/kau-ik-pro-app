@@ -20,6 +20,7 @@ import {
     setThemeSettings,
     useThemeSettings,
     type Convention,
+    type FontScale,
     type ThemeMode,
 } from '../lib/theme-store';
 import { checkForUpdates, listenTrayEvents } from '../lib/tauri';
@@ -45,6 +46,13 @@ const MODE_OPTIONS: { key: ThemeMode; label: string }[] = [
 const CONVENTION_OPTIONS: { key: Convention; label: string }[] = [
     { key: 'tw', label: '紅漲綠跌' },
     { key: 'intl', label: '綠漲紅跌' },
+];
+
+const FONT_SCALE_OPTIONS: { key: FontScale; label: string }[] = [
+    { key: 90, label: '小' },
+    { key: 100, label: '標準' },
+    { key: 110, label: '大' },
+    { key: 125, label: '特大' },
 ];
 
 function Menu({
@@ -130,6 +138,26 @@ function ThemeSettings() {
                         <span className={panel.dirText.down}>
                             ▼ -1.25 下跌
                         </span>
+                    </div>
+                    <span className={styles.settingLabel}>字級 Font Size</span>
+                    <div className={styles.settingGroup}>
+                        {FONT_SCALE_OPTIONS.map((f) => (
+                            <button
+                                key={f.key}
+                                className={
+                                    styles.opt[
+                                        settings.fontScale === f.key
+                                            ? 'on'
+                                            : 'off'
+                                    ]
+                                }
+                                onClick={() =>
+                                    setThemeSettings({ fontScale: f.key })
+                                }
+                            >
+                                {f.label}
+                            </button>
+                        ))}
                     </div>
                     <span className={styles.settingLabel}>音效 Sound</span>
                     <button

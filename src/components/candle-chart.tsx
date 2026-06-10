@@ -28,7 +28,7 @@ import type { Candle } from '../lib/types/market';
 import { ACTIVE_ORDER_STATUSES, type Trade } from '../lib/types/order';
 import { fmtPrice } from '../lib/utils/format';
 import { roundToTick } from '../lib/utils/ticksize';
-import { getChartColors, useThemeSettings } from '../lib/theme-store';
+import { chartFontSize, getChartColors, useThemeSettings } from '../lib/theme-store';
 import {
     aggregate,
     dateStrOffset,
@@ -97,7 +97,7 @@ export function CandleChart({
     const tf = TIMEFRAMES[tfIdx] ?? TIMEFRAMES[1];
     const themeSettings = useThemeSettings();
     const colors = getChartColors(themeSettings);
-    const themeKey = `${themeSettings.mode}-${themeSettings.convention}`;
+    const themeKey = `${themeSettings.mode}-${themeSettings.convention}-${themeSettings.fontScale}`;
     const [mode, setMode] = useState<TradeMode>('observe');
     const [tradeQty, setTradeQty] = useState(1);
     const [indicators, setIndicators] = useState<Set<string>>(loadIndicators);
@@ -142,7 +142,7 @@ export function CandleChart({
                 background: { type: ColorType.Solid, color: 'transparent' },
                 textColor: c.text,
                 fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 10,
+                fontSize: chartFontSize(10),
                 attributionLogo: false,
             },
             grid: {
@@ -286,7 +286,7 @@ export function CandleChart({
         const chart = chartRef.current;
         if (!chart) return;
         chart.applyOptions({
-            layout: { textColor: colors.text },
+            layout: { textColor: colors.text, fontSize: chartFontSize(10) },
             grid: {
                 vertLines: { color: colors.grid },
                 horzLines: { color: colors.grid },
