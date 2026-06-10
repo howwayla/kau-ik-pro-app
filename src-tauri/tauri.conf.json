@@ -1,0 +1,55 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Shioaji Pro",
+  "version": "0.1.0",
+  "identifier": "com.sinotrade.shioaji-pro",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Shioaji Pro — 交易終端",
+        "width": 1680,
+        "height": 980,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/shioaji"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE0RjNFMTNENTEzMjJGRDEKUldUUkx6SlJQZUh6RklXbjUwZ3IvR29oc1NXMTBiQ0IxWkhIcnFVZkZzN2NCNFovZzUwTnI3MVgK",
+      "endpoints": [
+        "https://github.com/Sinotrade/shioaji-pro-app/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

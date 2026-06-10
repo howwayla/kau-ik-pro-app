@@ -1,0 +1,39 @@
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.45;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: inherit;
+}
+
+button {
+    font-family: inherit;
+    font-size: inherit;
+}
+
+input,
+select {
+    font-family: inherit;
+}
+
+/* flash-up / flash-down keyframes live in theme.css.ts (theme-aware) */
+@keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}

@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Tauri
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/schemas/
+
+# Server
+server/vendor/*.tgz
+server/data/
