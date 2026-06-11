@@ -162,7 +162,7 @@ export class MarketManager implements MarketDataProvider, PriceFeed {
         return this.active.shortStockSources(keys);
     }
 
-    regulatoryPunish(): Promise<{ code: string[] }> {
+    regulatoryPunish(): Promise<{ code: string[]; attention: string[] }> {
         return this.active.regulatoryPunish();
     }
 

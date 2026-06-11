@@ -51,7 +51,8 @@ export interface MarketDataProvider {
 
     creditEnquire(keys: ContractKey[]): Promise<CreditEnquire[]>;
     shortStockSources(keys: ContractKey[]): Promise<ShortSource[]>;
-    regulatoryPunish(): Promise<{ code: string[] }>;
+    /** code = 處置 list (legacy field name), attention = 注意 list */
+    regulatoryPunish(): Promise<{ code: string[]; attention: string[] }>;
 
     /** idempotent — duplicate subscribes are no-ops */
     subscribe(key: ContractKey, quote: StreamQuoteType): Promise<void>;

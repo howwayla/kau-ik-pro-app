@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuote } from '../hooks/use-stream';
 import type { WatchItem } from '../hooks/use-watchlist';
+import { useRegulatoryFlag } from '../lib/regulatory';
 import type { ContractInfo, SecurityType } from '../lib/types/contract';
 import { fmtPct, fmtPrice, fmtSigned } from '../lib/utils/format';
 import * as panel from './panel.css';
@@ -21,6 +22,7 @@ function WatchRow({
 }) {
     const quote = useQuote(item.contract.code);
     const tick = quote?.tick;
+    const regFlag = useRegulatoryFlag(item.contract.code);
 
     const close = tick ? Number(tick.close) : item.snapshot?.close;
     const ref = item.contract.reference;
@@ -46,7 +48,24 @@ function WatchRow({
             className={`${styles.row[selected ? 'selected' : 'normal']} ${styles.flash[flashDir]}`}
             onClick={() => onSelect(item.contract)}
         >
-            <span className={styles.code}>{item.contract.code}</span>
+            <span className={styles.code}>
+                {item.contract.code}
+                {regFlag === 'punish' && (
+                    <span className={styles.rowBadge.punish} title='處置股'>
+                        處
+                    </span>
+                )}
+                {regFlag === 'attention' && (
+                    <span className={styles.rowBadge.attention} title='注意股'>
+                        注
+                    </span>
+                )}
+                {tick?.simtrade && (
+                    <span className={styles.rowBadge.trial} title='試算撮合'>
+                        試
+                    </span>
+                )}
+            </span>
             <span className={`${styles.price} ${panel.dirText[dir]}`}>
                 {fmtPrice(close)}
             </span>

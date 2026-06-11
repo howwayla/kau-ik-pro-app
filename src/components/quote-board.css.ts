@@ -76,3 +76,18 @@ export const statLabel = style({
 export const statValue = style({
     textAlign: 'right',
 });
+
+// 試撮 indicator next to the big price
+export const trialBadge = style({
+    display: 'inline-block',
+    marginLeft: '6px',
+    verticalAlign: 'middle',
+    fontFamily: vars.font.display,
+    fontSize: '0.6rem',
+    fontWeight: 600,
+    color: vars.color.amber,
+    border: `1px solid ${vars.color.amber}`,
+    borderRadius: vars.radius.sm,
+    padding: '1px 4px',
+    lineHeight: 1.2,
+});

@@ -40,7 +40,14 @@ export function QuoteBoard({
                 <span className={styles.symbolName}>{contract.name}</span>
             </div>
 
-            <span className={styles.bigPrice[dir]}>{fmtPrice(close)}</span>
+            <span className={styles.bigPrice[dir]}>
+                {fmtPrice(close)}
+                {tick?.simtrade && (
+                    <span className={styles.trialBadge} title='試算撮合價格'>
+                        試
+                    </span>
+                )}
+            </span>
 
             <div className={`${styles.changeBlock} ${panel.dirText[dir]}`}>
                 <span>{fmtSigned(chg)}</span>

@@ -45,6 +45,7 @@ import {
     tickFromTrade,
     type DayState,
 } from './map.ts';
+import { fetchRegulatoryLists } from './regulatory.ts';
 import {
     deliveryMonthOf,
     fromFugleSymbol,
@@ -631,7 +632,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         );
     }
 
-    // chips data has no fugle source — frontend handles empty results
+    // credit/short-source data has no fugle source — frontend handles empty
     async creditEnquire(_keys: ContractKey[]): Promise<CreditEnquire[]> {
         return [];
     }
@@ -640,8 +641,8 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         return [];
     }
 
-    async regulatoryPunish(): Promise<{ code: string[] }> {
-        return { code: [] };
+    async regulatoryPunish(): Promise<{ code: string[]; attention: string[] }> {
+        return fetchRegulatoryLists();
     }
 
     // ---- subscriptions ----

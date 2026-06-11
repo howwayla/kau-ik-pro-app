@@ -365,6 +365,7 @@ export function CandleChart({
     }
     useEffect(() => {
         if (!tick || tick.code !== contract.code) return;
+        if (tick.simtrade) return; // 試撮 never paints into candles
         const series = candleSeriesRef.current;
         if (!series) return;
         const price = Number(tick.close);

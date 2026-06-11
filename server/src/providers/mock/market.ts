@@ -173,8 +173,8 @@ export class MockMarketDataProvider implements MarketDataProvider {
         });
     }
 
-    async regulatoryPunish(): Promise<{ code: string[] }> {
-        return { code: ['6180'] };
+    async regulatoryPunish(): Promise<{ code: string[]; attention: string[] }> {
+        return { code: ['6180'], attention: ['3105'] };
     }
 
     async subscribe(key: ContractKey, quote: StreamQuoteType): Promise<void> {
