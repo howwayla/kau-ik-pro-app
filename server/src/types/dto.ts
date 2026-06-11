@@ -24,6 +24,8 @@ export interface ContractInfo extends Contract {
     limit_up: number;
     limit_down: number;
     reference: number;
+    /** 昨收 — 除權息日 ≠ reference（今日參考價）；當日損益變化要用這個 */
+    previous_close: number;
     day_trade: DayTrade;
     update_date: string;
     category: string;

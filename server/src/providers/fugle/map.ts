@@ -58,7 +58,9 @@ export interface DayState {
     avg: number;
     totalVolume: number;
     totalValue: number;
-    previousClose: number;
+    reference: number;
+    /** 昨收 — 除權息日 ≠ reference */
+    prevClose: number;
     name: string;
     bid: number;
     ask: number;
@@ -66,11 +68,12 @@ export interface DayState {
 }
 
 export function dayStateFromQuote(q: any): DayState {
+    // 參考價優先用 referencePrice（交易所公告今日參考價）— 除權息日
+    // 它 ≠ previousClose（昨收），漲跌幅/漲跌停都要以它為基準
+    const ref = num(q?.referencePrice ?? q?.previousClose);
     // pre-open the session has no trades yet: closePrice/lastPrice are
-    // null — show the previous close instead of 0
-    const last =
-        num(q?.closePrice ?? q?.lastPrice) ||
-        num(q?.previousClose ?? q?.referencePrice);
+    // null — show the reference price instead of 0
+    const last = num(q?.closePrice ?? q?.lastPrice) || ref;
     return {
         open: num(q?.openPrice) || last,
         high: num(q?.highPrice) || last,
@@ -79,7 +82,8 @@ export function dayStateFromQuote(q: any): DayState {
         avg: num(q?.avgPrice),
         totalVolume: num(q?.total?.tradeVolume),
         totalValue: num(q?.total?.tradeValue),
-        previousClose: num(q?.previousClose ?? q?.referencePrice),
+        reference: ref,
+        prevClose: num(q?.previousClose ?? q?.referencePrice),
         name: String(q?.name ?? ''),
         bid: num(q?.bids?.[0]?.price),
         ask: num(q?.asks?.[0]?.price),
@@ -92,7 +96,7 @@ export function snapshotFromState(
     exchange: string,
     s: DayState,
 ): Snapshot {
-    const chg = s.last - s.previousClose;
+    const chg = s.last - s.reference;
     return {
         code,
         exchange,
@@ -112,8 +116,8 @@ export function snapshotFromState(
         total_amount: s.totalValue,
         change_price: Math.round(chg * 100) / 100,
         change_rate:
-            s.previousClose > 0
-                ? Math.round((chg / s.previousClose) * 10000) / 100
+            s.reference > 0
+                ? Math.round((chg / s.reference) * 10000) / 100
                 : 0,
         change_type: chg > 0 ? 'Up' : chg < 0 ? 'Down' : 'Unchanged',
         tick_type: '',
@@ -141,7 +145,7 @@ export function tickFromTrade(
     }
     if (num(data.bid) > 0) state.bid = num(data.bid);
     if (num(data.ask) > 0) state.ask = num(data.ask);
-    const chg = price - state.previousClose;
+    const chg = price - state.reference;
     return {
         code: symbol,
         date,
@@ -165,8 +169,8 @@ export function tickFromTrade(
         chg_type: chg > 0 ? 2 : chg < 0 ? 4 : 3,
         price_chg: fmt(Math.round(chg * 100) / 100),
         pct_chg: fmt(
-            state.previousClose > 0
-                ? Math.round((chg / state.previousClose) * 10000) / 100
+            state.reference > 0
+                ? Math.round((chg / state.reference) * 10000) / 100
                 : 0,
         ),
         simtrade: isTrial,

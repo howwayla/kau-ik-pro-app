@@ -1,6 +1,8 @@
 // src/components/bottom-dock.tsx — positions / orders / account tabs
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { usePoll } from '../hooks/use-poll';
+import { apiPost } from '../lib/api';
 import { ensureContract } from '../lib/contracts-cache';
 import { cancelOrder, updateOrderQty } from '../lib/backend';
 import { notify, placeQuickOrder } from '../lib/trade';
@@ -9,7 +11,10 @@ import type {
     AccountBalance,
     Margin,
     Position,
+    StockPosition,
 } from '../lib/types/portfolio';
+import { SENSITIVE } from '../lib/privacy';
+import { dateStrOffset } from '../lib/utils/kbars';
 import {
     fmtInt,
     fmtMoney,
@@ -49,13 +54,48 @@ function PositionsTable({
         try {
             const contract = await ensureContract(p.code);
             const exit = p.direction === 'Buy' ? 'Sell' : 'Buy';
-            const qty =
-                mode === 'close' ? p.quantity : p.quantity * 2;
-            const trade = await placeQuickOrder(contract, exit, null, qty);
+            const isStock = contract.security_type === 'STK';
+            // 股票持倉的 quantity 是「張」，可能含零股小數（0.407 = 407 股）
+            const wholeLots = isStock
+                ? Math.floor(p.quantity + 1e-9)
+                : p.quantity;
+            const oddShares = isStock
+                ? Math.round((p.quantity - wholeLots) * 1000)
+                : 0;
+            if (mode === 'reverse' && oddShares > 0) {
+                throw new Error(
+                    '反手僅支援整張部位（零股不可賣超）— 請先平倉零股',
+                );
+            }
+            const parts: string[] = [];
+            if (wholeLots > 0) {
+                const qty = mode === 'close' ? wholeLots : wholeLots * 2;
+                const trade = await placeQuickOrder(contract, exit, null, qty);
+                parts.push(`整股市價${exit === 'Buy' ? '買' : '賣'} ${qty} 張 (${trade.status.status})`);
+            }
+            if (oddShares > 0) {
+                // 盤中零股僅收限價單 — 用漲/跌停價當「保證成交」的限價
+                const price =
+                    exit === 'Sell' ? contract.limit_down : contract.limit_up;
+                if (!price || price <= 0) {
+                    throw new Error('取不到漲跌停價，零股平倉請改用下單面板');
+                }
+                const trade = await placeQuickOrder(
+                    contract,
+                    exit,
+                    price,
+                    oddShares,
+                    { orderLot: 'IntradayOdd' },
+                );
+                parts.push(`零股限價${exit === 'Buy' ? '買' : '賣'} ${oddShares} 股 @${price} (${trade.status.status})`);
+            }
+            if (parts.length === 0) {
+                throw new Error('持倉數量為 0，無單可下');
+            }
             notify({
                 kind: 'ok',
                 title: mode === 'close' ? '⏹ 平倉單已送出' : '🔄 反手單已送出',
-                body: `${p.code} 市價${exit === 'Buy' ? '買' : '賣'} ${qty} (${trade.status.status})`,
+                body: `${p.code} ${parts.join('；')}`,
             });
             onChanged();
         } catch (e) {
@@ -99,13 +139,17 @@ function PositionsTable({
                             >
                                 {p.direction === 'Buy' ? '多 LONG' : '空 SHORT'}
                             </td>
-                            <td className={styles.td}>{fmtInt(p.quantity)}</td>
-                            <td className={styles.td}>{fmtPrice(p.price)}</td>
+                            <td className={`${styles.td} ${SENSITIVE}`}>
+                                {fmtInt(p.quantity)}
+                            </td>
+                            <td className={`${styles.td} ${SENSITIVE}`}>
+                                {fmtPrice(p.price)}
+                            </td>
                             <td className={styles.td}>
                                 {fmtPrice(p.last_price)}
                             </td>
                             <td
-                                className={`${styles.td} ${panel.dirText[dir]}`}
+                                className={`${styles.td} ${panel.dirText[dir]} ${SENSITIVE}`}
                             >
                                 {fmtSigned(p.pnl, 0)}
                             </td>
@@ -272,10 +316,10 @@ function OrdersTable({
                                     t.status.modified_price || t.order.price,
                                 )}
                             </td>
-                            <td className={styles.td}>
+                            <td className={`${styles.td} ${SENSITIVE}`}>
                                 {fmtInt(t.order.quantity)}
                             </td>
-                            <td className={styles.td}>
+                            <td className={`${styles.td} ${SENSITIVE}`}>
                                 {fmtInt(t.status.deal_quantity)}
                             </td>
                             <td className={styles.td}>
@@ -330,21 +374,139 @@ function OrdersTable({
 }
 
 function AccountView({
+    positions,
     balance,
     margin,
 }: {
+    positions: Position[];
     balance?: AccountBalance;
     margin?: Margin;
 }) {
-    const items: { label: string; value: string; dir?: 'up' | 'down' | 'flat' }[] =
-        [];
+    const stockPos = positions.filter(
+        (p): p is StockPosition => 'yd_quantity' in p,
+    );
+
+    // 今日未實現變化的基準＝「今日參考價」：除權息日參考價已調整股息，
+    // 算出來的是市場真實漲跌（除息缺口不計為虧損 — 股息另行入帳）。
+    // 若想對齊以昨收為基準的券商 app 口徑，改用 c.previous_close 即可。
+    const codesKey = stockPos.map((p) => p.code).join(',');
+    const [refs, setRefs] = useState<Record<string, number>>({});
+    useEffect(() => {
+        let alive = true;
+        for (const p of stockPos) {
+            if (refs[p.code]) continue;
+            ensureContract(p.code)
+                .then((c) => {
+                    if (alive && c.reference > 0) {
+                        setRefs((prev) =>
+                            prev[p.code] === c.reference
+                                ? prev
+                                : { ...prev, [p.code]: c.reference },
+                        );
+                    }
+                })
+                .catch(() => undefined);
+        }
+        return () => {
+            alive = false;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [codesKey]);
+
+    // 今日已實現損益（60 秒輪詢 — 玉山帳務 API 有嚴格速率限制）
+    const realizedPoll = usePoll<number>(
+        useCallback(async () => {
+            const today = dateStrOffset(0);
+            const rows = await apiPost<{ date: string; pnl: number }[]>(
+                '/api/v1/portfolio/profit_loss',
+                {
+                    begin_date: today,
+                    end_date: today,
+                    account_type: 'S',
+                    unit: 'Common',
+                },
+            ).catch(() => []);
+            return rows.reduce((s, r) => s + (Number(r.pnl) || 0), 0);
+        }, []),
+        60000,
+    );
+    const todayRealized = realizedPoll.data ?? 0;
+
+    const totalPnl = stockPos.reduce((s, p) => s + p.pnl, 0);
+    const totalCost = stockPos.reduce(
+        (s, p) => s + p.price * p.quantity * 1000,
+        0,
+    );
+    const totalMkt = stockPos.reduce(
+        (s, p) => s + (p.last_price > 0 ? p.last_price * p.quantity * 1000 : 0),
+        0,
+    );
+    const todayUnreal = stockPos.reduce((s, p) => {
+        const ref = refs[p.code];
+        return ref && p.last_price > 0
+            ? s + (p.last_price - ref) * p.quantity * 1000
+            : s;
+    }, 0);
+    const todayTotal = todayRealized + todayUnreal;
+    const ydMkt = totalMkt - todayUnreal; // 今日報酬率基準：昨日市值
+
+    const dirOf = (v: number): 'up' | 'down' | 'flat' =>
+        v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+    const withPct = (v: number, base: number) =>
+        `${fmtSigned(v, 0)}${base > 0 ? ` (${((v / base) * 100).toFixed(2)}%)` : ''}`;
+
+    const items: {
+        label: string;
+        value: string;
+        dir?: 'up' | 'down' | 'flat';
+        hint?: string;
+    }[] = [];
+    if (stockPos.length > 0) {
+        items.push(
+            {
+                label: '總未實現損益（報酬率）',
+                value: withPct(totalPnl, totalCost),
+                dir: dirOf(totalPnl),
+                hint: '券商回報的未實現損益加總；報酬率 = 未實現損益 ÷ 持股成本（成交均價×股數）',
+            },
+            {
+                label: '今日總損益（報酬率）',
+                value: withPct(todayTotal, ydMkt),
+                dir: dirOf(todayTotal),
+                hint: '今日已實現 + 今日未實現變化；報酬率以昨日市值為基準',
+            },
+            {
+                label: '今日已實現損益',
+                value: fmtSigned(todayRealized, 0),
+                dir: dirOf(todayRealized),
+                hint: '今日賣出部位的已實現損益（券商帳務）',
+            },
+            {
+                label: '今日未實現損益變化',
+                value: fmtSigned(todayUnreal, 0),
+                dir: dirOf(todayUnreal),
+                hint: 'Σ(現價 − 今日參考價) × 持股。以參考價為基準：除權息日已排除除息缺口，呈現市場真實漲跌（股息另計）；故與以昨收為基準的券商 app 在除權息日會有差異',
+            },
+            {
+                label: '總市值 Market Value',
+                value: fmtMoney(totalMkt),
+                hint: 'Σ 現價 × 持股',
+            },
+        );
+    }
     if (balance) {
         items.push({
             label: '證券交割帳戶 Balance',
             value: fmtMoney(balance.acc_balance),
         });
     }
-    if (margin) {
+    // 期貨保證金區塊 — 只在有期貨帳戶資料時顯示（純證券券商隱藏）
+    const hasMargin =
+        margin &&
+        (margin.equity !== 0 ||
+            margin.available_margin !== 0 ||
+            margin.initial_margin !== 0);
+    if (hasMargin) {
         items.push(
             { label: '權益數 Equity', value: fmtMoney(margin.equity) },
             {
@@ -360,24 +522,9 @@ function AccountView({
                 value: fmtMoney(margin.maintenance_margin),
             },
             {
-                label: '風險指標 Risk',
-                value: `${margin.risk_indicator.toFixed(0)}%`,
-                dir:
-                    margin.risk_indicator >= 100
-                        ? 'flat'
-                        : margin.risk_indicator >= 50
-                          ? 'up'
-                          : 'up',
-            },
-            {
                 label: '期貨平倉損益 Settle P&L',
                 value: fmtSigned(margin.future_settle_profitloss, 0),
-                dir:
-                    margin.future_settle_profitloss > 0
-                        ? 'up'
-                        : margin.future_settle_profitloss < 0
-                          ? 'down'
-                          : 'flat',
+                dir: dirOf(margin.future_settle_profitloss),
             },
         );
     }
@@ -387,10 +534,13 @@ function AccountView({
     return (
         <div className={styles.accountGrid}>
             {items.map((it) => (
-                <div key={it.label} className={styles.statCard}>
-                    <span className={styles.statCardLabel}>{it.label}</span>
+                <div key={it.label} className={styles.statCard} title={it.hint}>
+                    <span className={styles.statCardLabel}>
+                        {it.label}
+                        {it.hint ? ' ⓘ' : ''}
+                    </span>
                     <span
-                        className={`${styles.statCardValue} ${it.dir ? panel.dirText[it.dir] : ''}`}
+                        className={`${styles.statCardValue} ${it.dir ? panel.dirText[it.dir] : ''} ${SENSITIVE}`}
                     >
                         {it.value}
                     </span>
@@ -406,14 +556,28 @@ export function BottomDock({
     balance,
     margin,
     onTradesChanged,
+    onRefreshAll,
 }: {
     positions: Position[];
     trades: Trade[];
     balance?: AccountBalance;
     margin?: Margin;
     onTradesChanged: () => void;
+    onRefreshAll?: () => Promise<void> | void;
 }) {
     const [tab, setTab] = useState<TabKey>('positions');
+    const [refreshing, setRefreshing] = useState(false);
+    const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+    const doRefresh = async () => {
+        if (refreshing || !onRefreshAll) return;
+        setRefreshing(true);
+        try {
+            await onRefreshAll();
+            setRefreshedAt(new Date());
+        } finally {
+            setRefreshing(false);
+        }
+    };
     const activeOrders = trades.filter((t) =>
         ACTIVE_STATUSES.has(t.status.status),
     ).length;
@@ -436,6 +600,23 @@ export function BottomDock({
                         {t.label}
                     </button>
                 ))}
+                {onRefreshAll && (
+                    <button
+                        className={styles.tab.off}
+                        style={{ marginLeft: 'auto' }}
+                        disabled={refreshing}
+                        title='向券商重新查詢持倉/委託/帳務（平時由主動回報自動更新）'
+                        onClick={() => void doRefresh()}
+                    >
+                        {refreshing
+                            ? '↻ 更新中…'
+                            : `↻ 重整${
+                                  refreshedAt
+                                      ? ` · ${refreshedAt.toLocaleTimeString('zh-TW', { hour12: false })}`
+                                      : ''
+                              }`}
+                    </button>
+                )}
             </div>
             <div className={panel.panelBody}>
                 {tab === 'positions' && (
@@ -448,7 +629,11 @@ export function BottomDock({
                     <OrdersTable trades={trades} onChanged={onTradesChanged} />
                 )}
                 {tab === 'account' && (
-                    <AccountView balance={balance} margin={margin} />
+                    <AccountView
+                        positions={positions}
+                        balance={balance}
+                        margin={margin}
+                    />
                 )}
             </div>
         </div>

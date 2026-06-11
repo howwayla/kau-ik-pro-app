@@ -93,12 +93,18 @@ export function Watchlist({
     onSelect,
     onAdd,
     onRemove,
+    lists = [],
+    activeListId = null,
+    onSelectList,
 }: {
     items: WatchItem[];
     selectedCode: string | null;
     onSelect: (c: ContractInfo) => void;
     onAdd: (code: string, type: SecurityType) => Promise<unknown>;
     onRemove: (code: string) => void;
+    lists?: { id: string; name: string }[];
+    activeListId?: string | null;
+    onSelectList?: (id: string) => void;
 }) {
     const [input, setInput] = useState('');
     const [type, setType] = useState<SecurityType>('STK');
@@ -120,6 +126,23 @@ export function Watchlist({
 
     return (
         <>
+            {lists.length > 1 && onSelectList && (
+                <div className={styles.addRow}>
+                    <select
+                        className={styles.typeSelect}
+                        style={{ flex: 1 }}
+                        value={activeListId ?? ''}
+                        onChange={(e) => onSelectList(e.target.value)}
+                        title='切換自選清單（含從富果會員匯入的清單）'
+                    >
+                        {lists.map((l) => (
+                            <option key={l.id} value={l.id}>
+                                {l.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            )}
             <div className={panel.panelBody}>
                 <div className={styles.list}>
                     {items.map((item) => (

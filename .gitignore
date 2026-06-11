@@ -25,3 +25,6 @@ src-tauri/gen/schemas/
 # Server
 server/vendor/*.tgz
 server/data/
+
+# Broker SDK logs
+server/log/

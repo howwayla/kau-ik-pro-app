@@ -20,6 +20,18 @@ import { fmtPrice } from '../lib/utils/format';
 import * as panel from './panel.css';
 import * as styles from './order-ticket.css';
 
+/** 台股收單時段提示 — 收盤後先講，免得送單才被券商打回 */
+function sessionHint(now = new Date()): string | null {
+    const day = now.getDay();
+    if (day === 0 || day === 6) return '⏰ 非交易日 — 送單將被券商拒絕或列為預約單';
+    const hm = now.getHours() * 100 + now.getMinutes();
+    if (hm >= 830 && hm < 1330) return null; // 盤中正常收單
+    if (hm >= 1330 && hm < 1430) {
+        return '⏰ 已收盤 — 目前僅盤後定價（14:00–14:30）與盤後零股（13:40–14:30）時段';
+    }
+    return '⏰ 已收盤 — 現在送單將被券商拒絕，或需等券商開放預約單時段（各家不同）';
+}
+
 export function OrderTicket({
     contract,
     onPlaced,
@@ -233,6 +245,35 @@ export function OrderTicket({
                 </div>
 
                 <div className={styles.fieldRow}>
+                    <span className={styles.fieldLabel}></span>
+                    <div className={styles.segGroup}>
+                        {(
+                            [
+                                ['跌停', contract.limit_down, panel.dirText.down],
+                                ['平盤', contract.reference, ''],
+                                ['漲停', contract.limit_up, panel.dirText.up],
+                            ] as const
+                        ).map(([label, value, color]) => (
+                            <button
+                                key={label}
+                                className={`${styles.seg.off} ${color}`}
+                                disabled={!value || value <= 0}
+                                title={value ? `帶入 ${fmtPrice(value)}` : ''}
+                                onClick={() => {
+                                    priceTouched.current = true;
+                                    setPriceType('LMT');
+                                    setPrice(String(value));
+                                    setArmed(false);
+                                }}
+                            >
+                                {label}
+                                {value > 0 ? ` ${fmtPrice(value)}` : ''}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className={styles.fieldRow}>
                     <span className={styles.fieldLabel}>數量{qtyUnit}</span>
                     <button
                         className={styles.stepBtn}
@@ -424,6 +465,9 @@ export function OrderTicket({
                 >
                     {feedback.text}
                 </span>
+            )}
+            {sessionHint() && (
+                <span className={styles.feedback}>{sessionHint()}</span>
             )}
         </div>
     );

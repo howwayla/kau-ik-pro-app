@@ -9,7 +9,12 @@ import {
     placeStockOrder,
 } from './backend';
 import type { ContractBase } from './types/contract';
-import { ACTIVE_ORDER_STATUSES, type Action, type Trade } from './types/order';
+import {
+    ACTIVE_ORDER_STATUSES,
+    type Action,
+    type StockOrderLot,
+    type Trade,
+} from './types/order';
 
 export interface AppNotice {
     kind: 'ok' | 'err' | 'info';
@@ -42,14 +47,22 @@ export async function placeQuickOrder(
     action: Action,
     price: number | null,
     quantity: number,
-    opts?: { bypassRisk?: boolean }, // protective exits skip risk gating
+    opts?: {
+        bypassRisk?: boolean; // protective exits skip risk gating
+        orderLot?: StockOrderLot; // e.g. IntradayOdd for odd-lot closes
+    },
 ): Promise<Trade> {
     if (!opts?.bypassRisk) {
-        const blocked = checkOrderAllowed(quantity);
+        // risk caps are denominated in 張 — odd-lot orders carry 股
+        const riskQty =
+            opts?.orderLot === 'IntradayOdd' || opts?.orderLot === 'Odd'
+                ? quantity / 1000
+                : quantity;
+        const blocked = checkOrderAllowed(riskQty);
         if (blocked) throw new Error(blocked);
     }
     const market = price === null;
-    return sendOrder(contract, action, price, quantity, market);
+    return sendOrder(contract, action, price, quantity, market, opts?.orderLot);
 }
 
 async function sendOrder(
@@ -58,6 +71,7 @@ async function sendOrder(
     price: number | null,
     quantity: number,
     market: boolean,
+    orderLot: StockOrderLot = 'Common',
 ): Promise<Trade> {
     if (isFuturesContract(contract) && !getCapabilities().futures_trading) {
         throw new Error('目前券商不支援期貨/選擇權下單（期權僅供行情顯示）');
@@ -76,8 +90,9 @@ async function sendOrder(
               price: price ?? 0,
               quantity,
               price_type: market ? 'MKT' : 'LMT',
-              order_type: market ? 'IOC' : 'ROD',
-              order_lot: 'Common',
+              // 盤中零股僅收 ROD 限價
+              order_type: market && orderLot === 'Common' ? 'IOC' : 'ROD',
+              order_lot: orderLot,
           });
     return trade;
 }

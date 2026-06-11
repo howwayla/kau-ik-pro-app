@@ -25,8 +25,7 @@ export function registerHealthRoutes(
             'Nova Pro local server — trading via Fubon/Taishin SDK, market data via Fugle',
         protocols: ['http', 'sse'],
         simulation:
-            ctx.config.tradeProvider === 'mock' ||
-            ctx.market.name() === 'mock',
+            ctx.trading.name() === 'mock' || ctx.market.name() === 'mock',
         capabilities: {
             futures_trading: ctx.trading.capabilities().futures,
         },

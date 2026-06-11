@@ -61,19 +61,38 @@ React 前端 ── HTTP REST + SSE ──► server/（Fastify）
 - **音效回報** — 成交/委託/警示分音色（可關閉）
 - **斷線自愈** — SSE 重連後自動重新訂閱所有商品
 - **主題** — 深色 / 純黑 / 淺色 × 紅漲綠跌(台式) / 綠漲紅跌(美式)
+- **券商熱切換** — 表頭選單在 mock / 富邦 / 台新 / 玉山 間切換免重啟，
+  券商模式行情自動改用該券商 SDK 自帶行情（免富果 Key），開機恢復上次選擇
+- **多自選清單** — 清單下拉切換；`POST /api/v1/watchlist/import` 批次匯入
+  外部清單（同名覆蓋，適合從會員系統同步）
+- **證券帳務概覽** — 總未實現損益（報酬率）、今日總損益、今日已實現、
+  今日未實現變化、總市值、交割餘額；期貨保證金卡片僅期貨帳戶顯示
+- **隱私模式** — 一鍵模糊持倉數量/成本/損益等機敏數字（截圖、分享畫面用），
+  行情價格不受影響
+- **下單快速帶價** — 下單面板一鍵帶入漲停/平盤/跌停價（自動對齊合法 tick）
+- **帳務事件驅動** — 帳務查詢以券商主動回報驅動快取失效，避開帳務 API
+  流量控管；收盤後五檔/報價保留最後狀態（SSE snapshot 重放）
 
 ## 券商支援矩陣
 
 | Provider | 證券下單 | 期貨/選擇權下單 | 登入方式 | 狀態 |
 |---|---|---|---|---|
 | `mock`（預設） | ✅ 模擬撮合 | ✅ 模擬撮合 + 保證金 | 不需要 | 可用 |
-| `fubon` 富邦新一代 | ✅ | ✅ | 身分證字號＋密碼＋憑證 .pfx | Skeleton（照官方文件實作，待 SDK 實測，搜尋 `TODO(verify)`） |
-| `nova` 台新 Nova | ✅ | ❌（前端自動隱藏期權下單 UI） | 身分證字號＋密碼＋憑證 .pfx | Skeleton（Phase 3，搜尋 `TODO(phase3)`） |
+| `fubon` 富邦新一代 | ✅ | ✅ | 身分證字號＋密碼（或 API Key）＋憑證 .pfx | 已實作（依 fubon-neo 2.2.8 + 官方文件查證，含實單下單/刪單驗證） |
+| `nova` 台新 Nova | ✅ | ❌（前端自動隱藏期權下單 UI） | 身分證字號＋密碼＋憑證 .p12 | 已實作（依 taishin-sdk 1.0.2 + 官方文件查證，含實單下單/刪單驗證） |
+| `esun` 玉山 | ✅ | ❌（前端自動隱藏期權下單 UI） | 帳號＋密碼＋API Key/Secret＋憑證 .p12 | 已實作（依 @esun/trade 2.2.0 typings 查證；登入/查詢/行情已實測，下單待實單驗證） |
 
-行情：`mock`（預設）或 `fugle`（富果，已支援 — 在 app 表頭「行情」選單貼上
-API Key 即可切換，免改設定檔）。注意：**台指期／選擇權行情需要富果方案包含
-期權行情**，若 API 回 403 會自動降級（證券行情不受影響，期權面板顯示無資料），
-server log 會有明確警告。
+**券商熱切換**：表頭「券商」選單可在 mock / 富邦 / 台新 間直接切換，
+免重啟 server。憑證來源（擇一）：環境變數（`FUBON_*` / `NOVA_*`，見
+`.env.example`）、或在選單表單輸入一次（存到 gitignored
+`server/data/config.json`，權限 600）。切換到券商後**行情自動改用該券商
+SDK 自帶的行情**（富邦/台新行情 API，免富果 Key）；切回 mock 則恢復
+「行情」選單的獨立設定（富果 Key 或模擬）。
+
+行情：`mock`（預設）、`fugle`（富果 — 表頭「行情」選單貼 API Key）、或
+券商自帶行情（隨「券商」選單自動跟隨）。注意：**台指期／選擇權行情需要
+方案包含期權行情**，若 API 回 403 會自動降級（證券行情不受影響，期權
+面板顯示無資料），server log 會有明確警告。
 
 期權下單能力由 server 在 `GET /api/v1/info` 回傳的
 `capabilities.futures_trading` 決定，前端據此顯示/隱藏期權下單介面 —
@@ -83,7 +102,7 @@ server log 會有明確警告。
 
 ### 1. Prerequisites 前置需求
 
-- [Node.js](https://nodejs.org/) 20+ 與 [pnpm](https://pnpm.io/)
+- [Node.js](https://nodejs.org/) 20.19+ / 22+（Vite 8 要求；repo 附 `.nvmrc`）與 [pnpm](https://pnpm.io/)
 - （mock 模式不需要其他東西）
 
 ### 2. 安裝與啟動（mock 模式）
@@ -110,13 +129,16 @@ cp .env.example .env   # 填入金鑰；.env 已被 .gitignore 排除，請勿 c
 - **富邦交易**：開戶＋申請憑證後，從官網下載 `fubon-neo-<version>.tgz`
   放入 `server/vendor/`，執行
   `pnpm --filter nova-pro-server add file:vendor/fubon-neo-<version>.tgz`，
-  設 `TRADE_PROVIDER=fubon` 與 `BROKER_*` 四個變數，
-  並解掉 `server/src/providers/fubon/` 內所有 `TODO(verify)`
-- **台新 Nova 交易**：同上模式，SDK 為 `taishinsdk-<version>.tgz`，
-  設 `TRADE_PROVIDER=nova`，完成 `TODO(phase3)`
+  設 `TRADE_PROVIDER=fubon` 與 `BROKER_*` 四個變數
+- **台新 Nova 交易**：同上模式，SDK 為 `taishin-sdk-<version>.tgz`，
+  設 `TRADE_PROVIDER=nova`。正式環境 API URL 已內建
+  （`https://fugletrade.tssco.com.tw`），測試環境用 `BROKER_API_URL` 覆蓋。
+  注意台新**一個帳號只允許一個 API session** — 若有其他程式（例如常駐的
+  fugle-trade MCP）佔用同帳號，帳務查詢會回空
 
-> ⚠️ 接上真實券商後，每一筆委託都是真實交易。請先以最小單位（零股／
-> 一口小台）驗證所有 `TODO(verify)` 的欄位對應，再正常使用。
+> ⚠️ 接上真實券商後，每一筆委託都是真實交易。兩家 provider 的欄位對應
+> 已依 SDK typings 與官方文件逐一查證，但尚未實單測試 — 請先以最小單位
+> （零股／一口小台）驗證下單、刪改單、回報全流程，再正常使用。
 
 ## Server API（與前端的契約）
 

@@ -21,6 +21,17 @@ export interface ContractKey {
     code: string;
 }
 
+/**
+ * Where the fugle-style market-data clients come from. A plain string is a
+ * Fugle API key; broker SDKs (fubon-neo / taishin-sdk) instead hand out
+ * already-authenticated @fugle/marketdata clients after initRealtime() —
+ * makeWs() must return a FRESH client so reconnects pick up a new token.
+ */
+export interface MarketClientSource {
+    makeRest(): unknown | Promise<unknown>;
+    makeWs(): unknown | Promise<unknown>;
+}
+
 export type StreamQuoteType = 'Tick' | 'BidAsk';
 export type TickChannel = 'tick_stk' | 'tick_fop';
 export type BidAskChannel = 'bidask_stk' | 'bidask_fop';

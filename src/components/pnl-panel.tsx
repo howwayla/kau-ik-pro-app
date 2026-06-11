@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { usePoll } from '../hooks/use-poll';
 import { apiPost } from '../lib/api';
+import { SENSITIVE } from '../lib/privacy';
 import { fmtMoney, fmtSigned } from '../lib/utils/format';
 import { dateStrOffset } from '../lib/utils/kbars';
 import * as dock from './bottom-dock.css';
@@ -117,7 +118,7 @@ export function PnlPanel() {
                 <div className={styles.bigStat}>
                     <span className={styles.bigLabel}>30 日已實現損益</span>
                     <span
-                        className={`${styles.bigValue} ${panel.dirText[dir]}`}
+                        className={`${styles.bigValue} ${panel.dirText[dir]} ${SENSITIVE}`}
                     >
                         {fmtSigned(total, 0)}
                     </span>
@@ -134,7 +135,7 @@ export function PnlPanel() {
                 <div className={dock.statCard}>
                     <span className={dock.statCardLabel}>平均獲利</span>
                     <span
-                        className={`${dock.statCardValue} ${panel.dirText.up}`}
+                        className={`${dock.statCardValue} ${panel.dirText.up} ${SENSITIVE}`}
                     >
                         {fmtMoney(Math.round(avgWin))}
                     </span>
@@ -142,7 +143,7 @@ export function PnlPanel() {
                 <div className={dock.statCard}>
                     <span className={dock.statCardLabel}>平均虧損</span>
                     <span
-                        className={`${dock.statCardValue} ${panel.dirText.down}`}
+                        className={`${dock.statCardValue} ${panel.dirText.down} ${SENSITIVE}`}
                     >
                         {fmtMoney(Math.round(avgLoss))}
                     </span>

@@ -51,8 +51,11 @@ function contractKey(c: ContractBase) {
 
 // ---- market source config ----
 
+/** fubon/nova/esun = the active broker's bundled market-data feed */
+export type MarketProviderName = 'mock' | 'fugle' | 'fubon' | 'nova' | 'esun';
+
 export interface MarketConfig {
-    provider: 'mock' | 'fugle';
+    provider: MarketProviderName;
     has_key: boolean;
 }
 
@@ -71,7 +74,46 @@ export function setMarketSource(body: {
     );
 }
 
+// ---- broker (trading) config ----
+
+export type TradeProviderName = 'mock' | 'fubon' | 'nova' | 'esun';
+
+export interface TradeConfig {
+    provider: TradeProviderName;
+    creds: Record<
+        'fubon' | 'nova' | 'esun',
+        { env: boolean; saved: boolean }
+    >;
+}
+
+export function fetchTradeConfig() {
+    return apiGet<TradeConfig>('/api/v1/config/trade');
+}
+
+/** log in to a broker (or back to mock) and hot-swap trading + market */
+export function setTradeSource(body: {
+    provider: TradeProviderName;
+    id_no?: string;
+    password?: string;
+    api_key?: string;
+    api_secret?: string;
+    cert_path?: string;
+    cert_pass?: string;
+    api_url?: string;
+}) {
+    return apiPost<{
+        provider: TradeProviderName;
+        market: MarketProviderName;
+        warning?: string;
+    }>('/api/v1/config/trade', body);
+}
+
 // ---- health / info / auth ----
+
+/** bust server-side account caches (used by the manual refresh button) */
+export function refreshAccountCaches() {
+    return apiPost<{ ok: boolean }>('/api/v1/portfolio/refresh', {});
+}
 
 export function fetchHealth() {
     return apiGet<Health>('/api/v1/health');

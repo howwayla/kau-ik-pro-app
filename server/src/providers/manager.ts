@@ -29,7 +29,8 @@ import type {
     TickChannel,
 } from './market-data.ts';
 
-export type MarketName = 'mock' | 'fugle';
+/** fubon/nova/esun = the broker SDK's bundled market-data feed */
+export type MarketName = 'mock' | 'fugle' | 'fubon' | 'nova' | 'esun';
 
 /** what paper trading needs from the market side */
 export interface PriceFeed {
