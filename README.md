@@ -24,6 +24,12 @@ React 前端 ── HTTP REST + SSE ──► server/（Fastify）
 以專業交易終端為目標：即時行情、K 線、五檔、閃電下單、圖表點價下單、
 停損停利觸價單、可拖拉的自訂版面。
 
+![Nova Pro — 富果即時行情（試撮時段，注意試/處標記）](docs/screenshot-dark.png)
+
+| Dark | Light |
+|------|-------|
+| ![dark](docs/screenshot-dark.png) | ![light](docs/screenshot-light.png) |
+
 ## Features 功能
 
 - **即時行情** — 單一 SSE 連線串流 tick / 五檔，自選清單成交閃動（只在真實成交時閃，試撮不閃）
@@ -64,7 +70,10 @@ React 前端 ── HTTP REST + SSE ──► server/（Fastify）
 | `fubon` 富邦新一代 | ✅ | ✅ | 身分證字號＋密碼＋憑證 .pfx | Skeleton（照官方文件實作，待 SDK 實測，搜尋 `TODO(verify)`） |
 | `nova` 台新 Nova | ✅ | ❌（前端自動隱藏期權下單 UI） | 身分證字號＋密碼＋憑證 .pfx | Skeleton（Phase 3，搜尋 `TODO(phase3)`） |
 
-行情：`mock`（預設）或 `fugle`（富果，Phase 2 實作中，需 `FUGLE_API_KEY`）。
+行情：`mock`（預設）或 `fugle`（富果，已支援 — 在 app 表頭「行情」選單貼上
+API Key 即可切換，免改設定檔）。注意：**台指期／選擇權行情需要富果方案包含
+期權行情**，若 API 回 403 會自動降級（證券行情不受影響，期權面板顯示無資料），
+server log 會有明確警告。
 
 期權下單能力由 server 在 `GET /api/v1/info` 回傳的
 `capabilities.futures_trading` 決定，前端據此顯示/隱藏期權下單介面 —
@@ -125,12 +134,18 @@ SSE events：`tick_stk` / `tick_fop` / `bidask_stk` / `bidask_fop` /
 `src-tauri/` 保留自原專案，但目前以 web 模式開發為主；Node server
 尚未包裝為 Tauri sidecar。
 
-## Safety notes 安全提醒
+## Safety notes 安全提醒與免責聲明
 
 - 預設為**模擬環境**；頂部會顯示「模擬環境」徽章，正式環境為紅色「正式環境」
 - 閃電下單預設**鎖定**，需手動啟用；圖表點價下單為 one-shot 模式
 - 停損/停利為**客戶端觸價單**，只在頁面開啟時監控
 - 正式環境的每一筆委託都是真實交易，請自行承擔風險
+
+> **免責聲明**：本軟體為開源專案，依 MIT 授權「現狀（AS IS）」提供，
+> 不附任何明示或默示之保證。本軟體非投資建議；串接真實券商後之所有
+> 交易盈虧、因軟體缺陷／行情延遲／斷線等造成之任何損失，均由使用者
+> 自行承擔。作者與貢獻者不對任何交易結果負責。憑證、密碼與 API Key
+> 僅儲存於使用者本機，請妥善保管。
 
 ## Stack
 
@@ -143,4 +158,7 @@ SSE events：`tick_stk` / `tick_fop` / `bidask_stk` / `bidask_fop` /
 
 ## License
 
-MIT
+MIT — 見 [LICENSE](LICENSE)。本專案 fork 自
+[Sinotrade/shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app)（MIT），
+保留原作者版權聲明；修改與新增部分版權屬本專案作者。
+「Shioaji」「Nova」「富果」等名稱為各原公司之商標，僅作描述性使用。

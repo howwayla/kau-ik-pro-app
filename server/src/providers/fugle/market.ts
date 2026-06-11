@@ -314,11 +314,24 @@ export class FugleMarketDataProvider implements MarketDataProvider {
 
     // ---- contracts ----
 
+    private futoptForbiddenWarned = false;
+
+    private warnIfForbidden(res: any): void {
+        if (res?.statusCode === 403 && !this.futoptForbiddenWarned) {
+            this.futoptForbiddenWarned = true;
+            console.warn(
+                'Fugle 期權行情回應 403 — 此 API Key 的方案未含期貨/選擇權行情，' +
+                    '台指期與選擇權 T 字將無資料（證券行情不受影響）',
+            );
+        }
+    }
+
     private async futuresTickers(): Promise<any[]> {
         if (this.futTickers && Date.now() - this.futTickersAt < TICKERS_TTL_MS) {
             return this.futTickers;
         }
         const res = await this.rest.futopt.intraday.tickers({ type: 'FUTURE' });
+        this.warnIfForbidden(res);
         this.futTickers = Array.isArray(res?.data) ? res.data : [];
         this.futTickersAt = Date.now();
         return this.futTickers!;
@@ -443,6 +456,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             return this.optChain;
         }
         const res = await this.rest.futopt.intraday.tickers({ type: 'OPTION' });
+        this.warnIfForbidden(res);
         const rows: any[] = Array.isArray(res?.data) ? res.data : [];
         const out: OptContract[] = [];
         for (const row of rows) {
