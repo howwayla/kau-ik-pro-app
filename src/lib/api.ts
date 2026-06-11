@@ -5,10 +5,12 @@ import { getApiBase } from './runtime';
 const base = getApiBase();
 
 // surface the server's {detail} error message when present
+// (fastify's default serializer uses {message} — accept both)
 async function fail(res: Response): Promise<never> {
     let detail = '';
     try {
-        detail = (await res.json())?.detail ?? '';
+        const body = await res.json();
+        detail = body?.detail ?? body?.message ?? '';
     } catch {
         // non-JSON error body
     }

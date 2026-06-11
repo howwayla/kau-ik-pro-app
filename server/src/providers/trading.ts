@@ -12,7 +12,7 @@ import type {
     StockOrderReq,
     Trade,
 } from '../types/dto.ts';
-import type { ContractKey } from './market-data.ts';
+import type { ContractKey, MarketClientSource } from './market-data.ts';
 
 export interface TradingCapabilities {
     futures: boolean;
@@ -44,6 +44,11 @@ export interface TradingProvider {
     ): Promise<PnlRow[]>;
 
     onOrderEvent(cb: (ev: OrderEventData) => void): void;
+
+    /** broker SDKs that bundle market data expose it here (after init) */
+    marketdataSource?(): MarketClientSource | null;
+    /** release sessions / sockets when the provider is swapped out */
+    dispose?(): void;
 }
 
 export class TradeNotFoundError extends Error {

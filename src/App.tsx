@@ -1,7 +1,7 @@
 // src/App.tsx — Nova Pro trading terminal
 // Dynamic panel blocks on a draggable grid, with named layout profiles.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import GridLayout, {
     useContainerWidth,
     type Layout,
@@ -41,7 +41,9 @@ import {
     fetchMargin,
     fetchPositions,
     fetchTrades,
+    refreshAccountCaches,
 } from './lib/backend';
+import { onOrderEvent } from './lib/stream';
 import { notify } from './lib/trade';
 import type { ContractInfo } from './lib/types/contract';
 import type { Trade } from './lib/types/order';
@@ -330,7 +332,15 @@ function PopoutView({
 }
 
 export default function App() {
-    const { items, loading, addSymbol, removeSymbol } = useWatchlist();
+    const {
+        items,
+        loading,
+        addSymbol,
+        removeSymbol,
+        lists,
+        activeListId,
+        selectList,
+    } = useWatchlist();
     const [selected, setSelected] = useState<ContractInfo | null>(null);
     const [workspace, setWorkspace] = useState<Workspace>(loadWorkspace);
     const [profiles, setProfiles] = useState<Profile[]>(loadProfiles);
@@ -344,7 +354,8 @@ export default function App() {
         }
     }, [items, selected]);
 
-    // portfolio polling (stock + futures merged)
+    // 帳務資料不輪詢（券商帳務 API 有嚴格限流）：載入抓一次，之後由
+    // 主動回報驅動刷新 + 手動重整按鈕；委託保留低頻輪詢當對賬保底
     const positionsPoll = usePoll<Position[]>(
         useCallback(async () => {
             const [st, fu] = await Promise.allSettled([
@@ -356,7 +367,7 @@ export default function App() {
                 ...(fu.status === 'fulfilled' ? fu.value : []),
             ];
         }, []),
-        10000,
+        null,
     );
     const tradesPoll = usePoll<Trade[]>(
         useCallback(async () => {
@@ -369,18 +380,52 @@ export default function App() {
                 ...(f.status === 'fulfilled' ? f.value : []),
             ];
         }, []),
-        8000,
+        30000,
     );
     const balancePoll = usePoll(
         useCallback(() => fetchAccountBalance(), []),
-        60000,
+        null,
     );
-    const marginPoll = usePoll(useCallback(() => fetchMargin(), []), 30000);
+    const marginPoll = usePoll(useCallback(() => fetchMargin(), []), null);
 
     const refreshTrading = useCallback(() => {
         tradesPoll.refresh();
         positionsPoll.refresh();
     }, [tradesPoll, positionsPoll]);
+
+    const refreshAccountAll = useCallback(async () => {
+        // 穿透 server 端快取後重抓全部帳務
+        await refreshAccountCaches().catch(() => undefined);
+        tradesPoll.refresh();
+        positionsPoll.refresh();
+        balancePoll.refresh();
+        marginPoll.refresh();
+    }, [tradesPoll, positionsPoll, balancePoll, marginPoll]);
+
+    // 主動回報 → 立即刷新：委託回報刷委託列表；成交回報連持倉/餘額
+    // 一起刷（800ms 去抖動，部分成交連發時只打一輪）
+    const eventRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(
+        null,
+    );
+    const dealSeen = useRef(false);
+    useEffect(
+        () =>
+            onOrderEvent((ev) => {
+                if (ev.operation?.op_type === 'Deal') dealSeen.current = true;
+                if (eventRefreshTimer.current) {
+                    clearTimeout(eventRefreshTimer.current);
+                }
+                eventRefreshTimer.current = setTimeout(() => {
+                    tradesPoll.refresh();
+                    if (dealSeen.current) {
+                        dealSeen.current = false;
+                        positionsPoll.refresh();
+                        balancePoll.refresh();
+                    }
+                }, 800);
+            }),
+        [tradesPoll, positionsPoll, balancePoll],
+    );
 
     // feed risk engine: unrealized position P&L + futures settle P&L
     useEffect(() => {
@@ -570,6 +615,9 @@ export default function App() {
         onSelect: setSelected,
         onAdd: addSymbol,
         onRemove: removeSymbol,
+        lists,
+        activeListId,
+        onSelectList: selectList,
     };
     const dockProps = {
         positions: positionsPoll.data ?? [],
@@ -577,6 +625,7 @@ export default function App() {
         balance: balancePoll.data,
         margin: marginPoll.data,
         onTradesChanged: refreshTrading,
+        onRefreshAll: refreshAccountAll,
     };
 
     return (

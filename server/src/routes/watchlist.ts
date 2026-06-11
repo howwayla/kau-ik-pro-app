@@ -16,6 +16,33 @@ export function registerWatchlistRoutes(
         ctx.watchlists.create(req.body.name, req.body.contracts ?? []),
     );
 
+    // bulk import (e.g. synced from an external watchlist source) —
+    // upserts by name so re-imports update in place
+    app.post<{
+        Body: {
+            lists?: {
+                name?: string;
+                contracts?: ServerWatchlist['contracts'];
+            }[];
+        };
+    }>('/api/v1/watchlist/import', async (req, reply) => {
+        const lists = req.body?.lists;
+        if (!Array.isArray(lists) || lists.length === 0) {
+            return reply
+                .code(400)
+                .send({ detail: 'lists 需為非空陣列：[{name, contracts}]' });
+        }
+        let created = 0;
+        let updated = 0;
+        for (const l of lists) {
+            if (!l?.name || !Array.isArray(l.contracts)) continue;
+            const res = ctx.watchlists.upsertByName(l.name, l.contracts);
+            if (res.created) created += 1;
+            else updated += 1;
+        }
+        return { imported: created + updated, created, updated };
+    });
+
     app.put<{
         Params: { id: string };
         Body: { contracts: ServerWatchlist['contracts'] };

@@ -11,10 +11,16 @@ import {
     fetchHealth,
     fetchInfo,
     fetchMarketConfig,
+    fetchTradeConfig,
     setMarketSource,
+    setTradeSource,
     type MarketConfig,
+    type TradeConfig,
+    type TradeProviderName,
 } from '../lib/backend';
 import { setCapabilities } from '../lib/capabilities';
+import { SENSITIVE, setPrivacy, usePrivacy } from '../lib/privacy';
+import { setActiveBroker } from '../lib/trigger-engine';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
     setThemeSettings,
@@ -222,9 +228,18 @@ function MarketSourceMenu() {
         }
     };
 
-    const isFugle = config?.provider === 'fugle';
+    const provider = config?.provider ?? 'mock';
+    const isFugle = provider === 'fugle';
+    const marketLabel =
+        {
+            mock: '模擬',
+            fugle: '富果',
+            fubon: '富邦',
+            nova: '台新',
+            esun: '玉山',
+        }[provider] ?? provider;
     return (
-        <Menu label={isFugle ? '行情·富果' : '行情·模擬'}>
+        <Menu label={`行情·${marketLabel}`}>
             {() => (
                 <>
                     <span className={styles.settingLabel}>
@@ -234,7 +249,9 @@ function MarketSourceMenu() {
                         目前：
                         {isFugle
                             ? '富果行情 API（真實報價）'
-                            : '內建模擬行情（隨機走動）'}
+                            : provider === 'mock'
+                              ? '內建模擬行情（隨機走動）'
+                              : `${marketLabel}券商行情（隨券商連線，免富果 Key）`}
                     </span>
                     <span className={styles.settingLabel}>
                         Fugle API Key
@@ -281,6 +298,252 @@ function MarketSourceMenu() {
                         Key 申請：developer.fugle.tw（僅存於本機
                         server/data/config.json）。注意：免費方案有 WebSocket
                         訂閱數與 REST 速率上限，自選清單過多時部分報價可能不動。
+                    </span>
+                </>
+            )}
+        </Menu>
+    );
+}
+
+function PrivacyToggle() {
+    const on = usePrivacy();
+    return (
+        <button
+            className={styles.resetBtn}
+            title={
+                on
+                    ? '隱私模式開啟中 — 金額/部位/損益已遮罩（點擊顯示）'
+                    : '開啟隱私模式 — 遮罩機敏數字，截圖/分享畫面用'
+            }
+            onClick={() => setPrivacy(!on)}
+        >
+            {on ? '🙈 隱私' : '👁 隱私'}
+        </button>
+    );
+}
+
+const BROKER_LABEL: Record<TradeProviderName, string> = {
+    mock: '模擬',
+    fubon: '富邦',
+    nova: '台新',
+    esun: '玉山',
+};
+
+function BrokerMenu() {
+    const [config, setConfig] = useState<TradeConfig | null>(null);
+    // broker awaiting credentials input (no env/saved creds on the server)
+    const [pending, setPending] = useState<'fubon' | 'nova' | 'esun' | null>(
+        null,
+    );
+    const [form, setForm] = useState({
+        idNo: '',
+        password: '',
+        apiKey: '',
+        apiSecret: '',
+        certPath: '',
+        certPass: '',
+    });
+    const [busy, setBusy] = useState<TradeProviderName | null>(null);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        fetchTradeConfig()
+            .then((cfg) => {
+                setConfig(cfg);
+                // scope client-side stop/take triggers to this broker
+                setActiveBroker(cfg.provider);
+            })
+            .catch(() => setConfig(null));
+    }, []);
+
+    const doSwitch = async (
+        provider: TradeProviderName,
+        creds?: typeof form,
+    ) => {
+        if (busy) return;
+        setBusy(provider);
+        setError('');
+        try {
+            const res = await setTradeSource({
+                provider,
+                ...(creds
+                    ? {
+                          id_no: creds.idNo,
+                          password: creds.password,
+                          api_key: creds.apiKey,
+                          api_secret: creds.apiSecret,
+                          cert_path: creds.certPath,
+                          cert_pass: creds.certPass,
+                      }
+                    : {}),
+            });
+            if (res.warning) {
+                setError(`⚠ ${res.warning}（5 秒後重新整理）`);
+                setTimeout(() => window.location.reload(), 5000);
+                return;
+            }
+            // contract caches / charts hold old-provider data — full reload
+            window.location.reload();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            setBusy(null);
+        }
+    };
+
+    const pick = (provider: TradeProviderName) => {
+        if (provider === current || busy) return;
+        if (provider === 'mock') {
+            void doSwitch('mock');
+            return;
+        }
+        const avail = config?.creds?.[provider];
+        if (avail?.saved || avail?.env) {
+            void doSwitch(provider);
+        } else {
+            setPending(provider);
+            setError('');
+        }
+    };
+
+    const current = config?.provider ?? 'mock';
+    const field = (key: keyof typeof form, value: string) =>
+        setForm((f) => ({ ...f, [key]: value }));
+    const formReady =
+        form.idNo.trim() &&
+        form.certPath.trim() &&
+        (form.password || form.apiKey.trim()) &&
+        (pending !== 'esun' ||
+            (form.password && form.apiKey.trim() && form.apiSecret.trim()));
+
+    return (
+        <Menu label={`券商·${BROKER_LABEL[current]}`}>
+            {() => (
+                <>
+                    <span className={styles.settingLabel}>
+                        券商 Trading Broker
+                    </span>
+                    <span className={styles.emptyHint}>
+                        目前：
+                        {current === 'mock'
+                            ? '模擬撮合（紙上交易）'
+                            : `${BROKER_LABEL[current]}證券 — ⚠ 真實下單`}
+                    </span>
+                    <div className={styles.settingGroup}>
+                        {(['mock', 'fubon', 'nova', 'esun'] as const).map(
+                            (p) => (
+                                <button
+                                    key={p}
+                                    className={
+                                        styles.opt[
+                                            current === p ? 'on' : 'off'
+                                        ]
+                                    }
+                                    disabled={Boolean(busy)}
+                                    onClick={() => pick(p)}
+                                >
+                                    {busy === p ? '登入中…' : BROKER_LABEL[p]}
+                                </button>
+                            ),
+                        )}
+                    </div>
+                    {pending && (
+                        <>
+                            <span className={styles.settingLabel}>
+                                {BROKER_LABEL[pending]}憑證（僅存於本機
+                                server/data/config.json）
+                            </span>
+                            <input
+                                className={styles.saveInput}
+                                placeholder={
+                                    pending === 'esun'
+                                        ? '證券帳號（884 開頭）'
+                                        : '身分證字號'
+                                }
+                                value={form.idNo}
+                                onChange={(e) => field('idNo', e.target.value)}
+                            />
+                            <input
+                                className={styles.saveInput}
+                                type='password'
+                                placeholder={
+                                    pending === 'fubon'
+                                        ? '密碼（或填下方 API Key）'
+                                        : '密碼'
+                                }
+                                value={form.password}
+                                onChange={(e) =>
+                                    field('password', e.target.value)
+                                }
+                            />
+                            {pending === 'fubon' && (
+                                <input
+                                    className={styles.saveInput}
+                                    type='password'
+                                    placeholder='API Key（可代替密碼）'
+                                    value={form.apiKey}
+                                    onChange={(e) =>
+                                        field('apiKey', e.target.value)
+                                    }
+                                />
+                            )}
+                            {pending === 'esun' && (
+                                <>
+                                    <input
+                                        className={styles.saveInput}
+                                        type='password'
+                                        placeholder='API Key'
+                                        value={form.apiKey}
+                                        onChange={(e) =>
+                                            field('apiKey', e.target.value)
+                                        }
+                                    />
+                                    <input
+                                        className={styles.saveInput}
+                                        type='password'
+                                        placeholder='API Secret'
+                                        value={form.apiSecret}
+                                        onChange={(e) =>
+                                            field('apiSecret', e.target.value)
+                                        }
+                                    />
+                                </>
+                            )}
+                            <input
+                                className={styles.saveInput}
+                                placeholder='憑證路徑（.pfx / .p12 絕對路徑）'
+                                value={form.certPath}
+                                onChange={(e) =>
+                                    field('certPath', e.target.value)
+                                }
+                            />
+                            <input
+                                className={styles.saveInput}
+                                type='password'
+                                placeholder='憑證密碼'
+                                value={form.certPass}
+                                onChange={(e) =>
+                                    field('certPass', e.target.value)
+                                }
+                            />
+                            <button
+                                className={styles.opt.off}
+                                disabled={Boolean(busy) || !formReady}
+                                onClick={() => void doSwitch(pending, form)}
+                            >
+                                {busy ? '登入中…（約 10 秒）' : '✓ 登入並切換'}
+                            </button>
+                        </>
+                    )}
+                    {error && (
+                        <span
+                            className={`${styles.emptyHint} ${panel.dirText.up}`}
+                        >
+                            ✕ {error}
+                        </span>
+                    )}
+                    <span className={styles.emptyHint}>
+                        切換到券商後：交易走券商 API、行情直接用券商行情
+                        （免富果 Key）。每一筆委託都是真實交易。
                     </span>
                 </>
             )}
@@ -565,7 +828,7 @@ export function HudHeader({
             {accBalance !== undefined && (
                 <div className={styles.chip}>
                     <span className={styles.chipLabel}>銀行水位</span>
-                    <span>{fmtMoney(accBalance)}</span>
+                    <span className={SENSITIVE}>{fmtMoney(accBalance)}</span>
                 </div>
             )}
 
@@ -585,6 +848,8 @@ export function HudHeader({
                 open={serverMgrOpen}
                 onToggle={setServerMgrOpen}
             />
+            <PrivacyToggle />
+            <BrokerMenu />
             <MarketSourceMenu />
             <RiskMenu />
             <AddBlockMenu

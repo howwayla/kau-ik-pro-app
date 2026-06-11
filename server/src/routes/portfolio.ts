@@ -19,6 +19,13 @@ export function registerPortfolioRoutes(
 
     app.post('/api/v1/portfolio/margin', async () => ctx.trading.margin());
 
+    // manual refresh: bust the manager's read caches so the next queries
+    // hit the broker for fresh data
+    app.post('/api/v1/portfolio/refresh', async () => {
+        ctx.trading.bustReadCaches();
+        return { ok: true };
+    });
+
     app.post<{
         Body: {
             begin_date: string;

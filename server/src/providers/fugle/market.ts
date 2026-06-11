@@ -31,6 +31,7 @@ import type {
 import type {
     BidAskChannel,
     ContractKey,
+    MarketClientSource,
     MarketDataProvider,
     StreamQuoteType,
     TickChannel,
@@ -84,10 +85,37 @@ function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
     });
 }
 
+// TW tick tables — mirrors src/lib/utils/ticksize.ts on the frontend
+function tickFor(code: string, type: SecurityType, price: number): number {
+    if (type === 'FUT' || type === 'IND') return 1;
+    if (type === 'OPT') return price >= 10 ? 1 : 0.1;
+    if (code.startsWith('00')) return price < 50 ? 0.01 : 0.05; // ETF
+    if (price < 10) return 0.01;
+    if (price < 50) return 0.05;
+    if (price < 100) return 0.1;
+    if (price < 500) return 0.5;
+    if (price < 1000) return 1;
+    return 5;
+}
+
+/** snap a raw ±10% bound onto the nearest legal tick inside the range */
+function limitPrice(
+    code: string,
+    type: SecurityType,
+    raw: number,
+    snap: 'up' | 'down',
+): number {
+    const tick = tickFor(code, type, raw);
+    const ticks = snap === 'up' ? Math.ceil(raw / tick - 1e-9) : Math.floor(raw / tick + 1e-9);
+    return Number((ticks * tick).toFixed(2));
+}
+
 interface CacheEntry {
     state: DayState;
     exchange: string;
     fetchedAt: number;
+    /** five-level book from the REST quote — seeds depth panels */
+    book?: { bids: unknown[]; asks: unknown[] };
 }
 
 export class FugleMarketDataProvider implements MarketDataProvider {
@@ -110,29 +138,34 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     private disposed = false;
     private wsFailedUntil = 0; // fail fast instead of re-timing-out per subscribe
 
-    constructor(private apiKey: string) {}
+    /** a Fugle API key, or broker-SDK-backed clients (see MarketClientSource) */
+    constructor(private source: string | MarketClientSource) {}
 
     async init(): Promise<void> {
-        if (!this.apiKey) throw new Error('需要 Fugle API Key');
-        this.sdk = await import('@fugle/marketdata');
-        this.rest = new this.sdk.RestClient({ apiKey: this.apiKey });
-        // validate the key with a cheap call
+        if (typeof this.source === 'string') {
+            if (!this.source) throw new Error('需要 Fugle API Key');
+            this.sdk = await import('@fugle/marketdata');
+            this.rest = new this.sdk.RestClient({ apiKey: this.source });
+        } else {
+            this.rest = await this.source.makeRest();
+        }
+        // validate the credentials with a cheap call
         const probe: any = await withTimeout<any>(
             this.rest.stock.intraday.quote({ symbol: '2330' }),
             REST_TIMEOUT_MS,
-            'Fugle REST API 連線逾時',
+            '行情 REST API 連線逾時',
         );
         if (!probe || probe.statusCode === 401 || probe.status === 401) {
-            throw new Error('Fugle API Key 無效（401）');
+            throw new Error('行情授權無效（401）');
         }
         if (probe.statusCode && probe.statusCode >= 400) {
             throw new Error(
-                `Fugle API 驗證失敗（${probe.statusCode}）: ${probe.message ?? ''}`,
+                `行情 API 驗證失敗（${probe.statusCode}）: ${probe.message ?? ''}`,
             );
         }
         if (!probe.symbol) {
             throw new Error(
-                `Fugle API 回應異常: ${JSON.stringify(probe).slice(0, 200)}`,
+                `行情 API 回應異常: ${JSON.stringify(probe).slice(0, 200)}`,
             );
         }
     }
@@ -159,11 +192,23 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         if (Date.now() < this.wsFailedUntil) {
             throw new Error('Fugle WebSocket 暫時不可用（稍後自動重試）');
         }
-        const client = new this.sdk.WebSocketClient({ apiKey: this.apiKey });
+        const client: any =
+            typeof this.source === 'string'
+                ? new this.sdk.WebSocketClient({ apiKey: this.source })
+                : await this.source.makeWs();
         const ws = kind === 'stock' ? client.stock : client.futopt;
         ws.on('message', (raw: any) => {
             try {
                 const msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                if (process.env.WS_DEBUG) {
+                    console.log(
+                        '[ws]',
+                        kind,
+                        msg?.event,
+                        msg?.channel ?? '-',
+                        JSON.stringify(msg?.data ?? msg ?? {}).slice(0, 100),
+                    );
+                }
                 this.handleWsMessage(kind, msg);
             } catch {
                 // malformed frame — ignore
@@ -244,12 +289,22 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     }
 
     private handleWsMessage(_kind: 'stock' | 'futopt', msg: any): void {
-        if (msg?.event !== 'data' || !msg.data) return;
+        // 'snapshot' arrives once right after subscribing (also after the
+        // close) — treat it like a data frame so depth/tape panels seed
+        // immediately instead of waiting for the next live update
+        if ((msg?.event !== 'data' && msg?.event !== 'snapshot') || !msg.data)
+            return;
         const data = msg.data;
         const symbol = String(data.symbol ?? '');
         if (!symbol) return;
         const channels = this.channelFor(symbol);
-        if (msg.channel === 'trades') {
+        // snapshot frames may omit `channel` — books carry bids/asks arrays
+        const channel =
+            msg.channel ??
+            (Array.isArray(data.bids) && Array.isArray(data.asks)
+                ? 'books'
+                : 'trades');
+        if (channel === 'trades') {
             const entry = this.quoteCache.get(symbol);
             const state = entry?.state ?? dayStateFromQuote({});
             if (!entry) {
@@ -263,7 +318,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             const appCode = fromFugleSymbol(symbol);
             if (appCode !== symbol) tick.code = appCode;
             for (const cb of this.tickCbs) cb(channels.tick, tick);
-        } else if (msg.channel === 'books') {
+        } else if (channel === 'books') {
             const bidask = bidaskFromBooks(symbol, data);
             const entry = this.quoteCache.get(symbol);
             if (entry) {
@@ -300,6 +355,9 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                       ? 'OTC'
                       : 'TSE',
                 fetchedAt: Date.now(),
+                ...(Array.isArray(q.bids) && Array.isArray(q.asks)
+                    ? { book: { bids: q.bids, asks: q.asks } }
+                    : {}),
             };
             // don't clobber a fresher WS price with a stale REST one
             if (cached && cached.state.lastUpdatedMs > entry.state.lastUpdatedMs) {
@@ -421,7 +479,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         exchange: string,
         state: DayState,
     ): ContractInfo {
-        const ref = state.previousClose || state.last;
+        const ref = state.reference || state.last;
         return {
             exchange: exchange as ContractInfo['exchange'],
             code,
@@ -429,9 +487,12 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             target_code: null,
             name: state.name || code,
             currency: 'TWD',
-            limit_up: Math.round(ref * 1.1 * 100) / 100,
-            limit_down: Math.round(ref * 0.9 * 100) / 100,
+            // 漲跌停必須落在合法 tick 上（±10% 範圍內最接近的 tick）—
+            // 直接四捨五入到小數兩位會產生 30.29 這種不可下單的價格
+            limit_up: limitPrice(code, type, ref * 1.1, 'down'),
+            limit_down: limitPrice(code, type, ref * 0.9, 'up'),
             reference: ref,
+            previous_close: state.prevClose || ref,
             day_trade: type === 'STK' ? 'Yes' : '',
             update_date: new Date().toISOString().slice(0, 10).replace(/-/g, '/'),
             category: '',
@@ -674,7 +735,18 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         if (set.has(quote)) return;
         set.add(quote);
         // seed day state so the first WS tick has open/high/low context
-        await this.fetchQuote(symbol);
+        const entry = await this.fetchQuote(symbol);
+        // REST quote 已帶最後五檔 — 直接 seed 深度面板，不必等 WS snapshot
+        if (quote === 'BidAsk' && entry?.book) {
+            const bidask = bidaskFromBooks(symbol, {
+                bids: entry.book.bids,
+                asks: entry.book.asks,
+            });
+            const appCode = fromFugleSymbol(symbol);
+            if (appCode !== symbol) bidask.code = appCode;
+            const channels = this.channelFor(symbol);
+            for (const cb of this.bidaskCbs) cb(channels.bidask, bidask);
+        }
         const ws = await this.ensureWs(this.wsKindFor(symbol));
         ws.subscribe({
             channel: quote === 'Tick' ? 'trades' : 'books',

@@ -1,16 +1,25 @@
 // server/src/index.ts — entry point: pick providers from env/saved config
 // and listen.
+//
+// Trade provider resolution: TRADE_PROVIDER env (explicit) wins, else the
+// provider last picked in the dashboard switcher (server/data/config.json),
+// else mock. Broker login failures fall back to mock so the app always
+// boots — switch again from the dashboard once the problem is fixed.
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildApp } from './app.ts';
-import { loadConfig } from './config.ts';
+import { credsComplete, loadConfig } from './config.ts';
 import type { AppContext } from './context.ts';
-import { FugleMarketDataProvider } from './providers/fugle/market.ts';
+import {
+    buildTradingProvider,
+    followMarket,
+    resolveBrokerCreds,
+} from './provider-switch.ts';
 import { MarketManager } from './providers/manager.ts';
 import { MockMarketDataProvider } from './providers/mock/market.ts';
 import { MockTradingProvider } from './providers/mock/trading.ts';
-import type { TradingProvider } from './providers/trading.ts';
+import { TradingManager } from './providers/trading-manager.ts';
 import { RuntimeConfigStore } from './runtime-config.ts';
 import { SseHub } from './sse/hub.ts';
 import { SubscriptionRegistry } from './sse/subscriptions.ts';
@@ -26,57 +35,63 @@ async function main(): Promise<void> {
         fugleApiKey: config.fugleApiKey,
     });
 
-    const manager = new MarketManager();
-    const saved = runtimeConfig.get();
-    let started = false;
-    if (saved.marketProvider === 'fugle' && saved.fugleApiKey) {
-        const fugle = new FugleMarketDataProvider(saved.fugleApiKey);
+    // start on mock market; followMarket below picks the real feed
+    const market = new MarketManager();
+    const mockMarket = new MockMarketDataProvider();
+    await mockMarket.init();
+    market.start(mockMarket, 'mock');
+
+    const trading = new TradingManager();
+    const tradeName = process.env.TRADE_PROVIDER
+        ? config.tradeProvider
+        : runtimeConfig.get().tradeProvider;
+
+    let activeTradeName = tradeName;
+    if (tradeName === 'mock') {
+        const mock = new MockTradingProvider(market);
+        await mock.init();
+        trading.start(mock, 'mock');
+    } else {
         try {
-            await fugle.init();
-            manager.start(fugle, 'fugle');
-            started = true;
-            console.log('market: fugle (saved API key)');
+            const creds = resolveBrokerCreds(
+                tradeName,
+                runtimeConfig,
+                undefined,
+                credsComplete(config.broker) ? config.broker : undefined,
+            );
+            const provider = await buildTradingProvider(
+                tradeName,
+                config,
+                creds,
+                market,
+            );
+            await provider.init();
+            trading.start(provider, tradeName);
         } catch (err) {
             console.warn(
-                `fugle init failed (${err instanceof Error ? err.message : err}) — falling back to mock`,
+                `${tradeName} 啟用失敗（${err instanceof Error ? err.message : err}）— 退回 mock，可從 dashboard 重新切換`,
             );
+            const mock = new MockTradingProvider(market);
+            await mock.init();
+            trading.start(mock, 'mock');
+            activeTradeName = 'mock';
         }
-    }
-    if (!started) {
-        const mock = new MockMarketDataProvider();
-        await mock.init();
-        manager.start(mock, 'mock');
     }
 
-    let trading: TradingProvider;
-    switch (config.tradeProvider) {
-        case 'fubon': {
-            const { FubonTradingProvider } = await import(
-                './providers/fubon/trading.ts'
-            );
-            trading = new FubonTradingProvider(config);
-            break;
-        }
-        case 'nova': {
-            const { NovaTradingProvider } = await import(
-                './providers/nova/trading.ts'
-            );
-            trading = new NovaTradingProvider(config);
-            break;
-        }
-        default:
-            // paper trading priced off the live market feed (mock or fugle)
-            trading = new MockTradingProvider(manager);
-    }
-
-    await trading.init();
+    const marketResult = await followMarket(
+        market,
+        trading,
+        activeTradeName,
+        runtimeConfig,
+    );
+    if (marketResult.warning) console.warn(marketResult.warning);
 
     const ctx: AppContext = {
         config,
-        market: manager,
+        market,
         trading,
         hub: new SseHub(),
-        subs: new SubscriptionRegistry(manager),
+        subs: new SubscriptionRegistry(market),
         watchlists: new WatchlistStore(join(dataDir, 'watchlists.json')),
         runtimeConfig,
         startedAt: Date.now(),
@@ -86,7 +101,7 @@ async function main(): Promise<void> {
     await app.listen({ port: config.port, host: config.host });
     console.log(
         `nova-pro-server listening on http://${config.host}:${config.port}` +
-            ` (market=${manager.name()}, trade=${config.tradeProvider})`,
+            ` (market=${market.name()}, trade=${trading.name()})`,
     );
 }
 

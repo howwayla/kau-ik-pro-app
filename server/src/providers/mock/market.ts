@@ -45,6 +45,7 @@ export class MockMarketDataProvider implements MarketDataProvider {
             target_code: inst.target_code,
             name: inst.name,
             currency: 'TWD',
+            previous_close: reference,
             limit_up: roundToTick(inst, reference * 1.1),
             limit_down: roundToTick(inst, reference * 0.9),
             reference,

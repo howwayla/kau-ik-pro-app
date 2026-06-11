@@ -2,7 +2,7 @@
 
 import type { Config } from './config.ts';
 import type { MarketManager } from './providers/manager.ts';
-import type { TradingProvider } from './providers/trading.ts';
+import type { TradingManager } from './providers/trading-manager.ts';
 import type { RuntimeConfigStore } from './runtime-config.ts';
 import type { SseHub } from './sse/hub.ts';
 import type { SubscriptionRegistry } from './sse/subscriptions.ts';
@@ -11,7 +11,7 @@ import type { WatchlistStore } from './watchlist-store.ts';
 export interface AppContext {
     config: Config;
     market: MarketManager;
-    trading: TradingProvider;
+    trading: TradingManager;
     hub: SseHub;
     subs: SubscriptionRegistry;
     watchlists: WatchlistStore;

@@ -37,3 +37,9 @@ select {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
 }
+
+/* 隱私模式 — 遮罩機敏數字（金額/部位/損益）；隱藏時不可選取複製 */
+[data-privacy="on"] .privacy-sensitive {
+    filter: blur(7px);
+    user-select: none;
+}

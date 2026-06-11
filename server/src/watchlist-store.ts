@@ -45,4 +45,18 @@ export class WatchlistStore {
         this.save();
         return list;
     }
+
+    /** idempotent bulk-import primitive: same name → replace contents */
+    upsertByName(
+        name: string,
+        contracts: ServerWatchlist['contracts'],
+    ): { list: ServerWatchlist; created: boolean } {
+        const existing = this.lists.find((l) => l.name === name);
+        if (existing) {
+            existing.contracts = contracts;
+            this.save();
+            return { list: existing, created: false };
+        }
+        return { list: this.create(name, contracts), created: true };
+    }
 }
