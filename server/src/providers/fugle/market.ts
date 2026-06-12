@@ -567,7 +567,11 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     async kbars(key: ContractKey, start: string, end: string): Promise<KBars> {
         const cacheKey = `${key.code}:${start}:${end}`;
         const hit = this.kbarsCache.get(cacheKey);
-        if (hit && Date.now() - hit.at < 10 * 60_000) return hit.kbars;
+        // 分鐘級（短區間）盤中會持續長新 K 棒 — 快取縮短到 1 分鐘
+        const spanDays =
+            (new Date(end).getTime() - new Date(start).getTime()) / 86_400_000;
+        const ttl = spanDays <= 70 ? 60_000 : 10 * 60_000;
+        if (hit && Date.now() - hit.at < ttl) return hit.kbars;
         const out = await this.kbarsUncached(key, start, end);
         if (out.datetime.length > 0) {
             if (this.kbarsCache.size > 50) this.kbarsCache.clear();
@@ -629,6 +633,33 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 sort: 'asc',
             });
             raw = res?.data ?? [];
+            // 歷史分K盤後才寫入（今日缺）— 用 intraday candles 補今日。
+            // 單位陷阱：historical volume=股、intraday volume=張（整股），
+            // 統一轉成股再併（興櫃 intraday 本來就是股、指數是金額）
+            const localToday = new Date()
+                .toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+            const histHasToday = raw.some(
+                (r: any) => String(r.date ?? '').slice(0, 10) === localToday,
+            );
+            if (!histHasToday) {
+                try {
+                    const today = await this.rest.stock.intraday.candles({
+                        symbol,
+                        timeframe,
+                    });
+                    const lots =
+                        key.security_type !== 'IND' &&
+                        key.exchange !== 'OES';
+                    const trows = (today?.data ?? []).map((r: any) =>
+                        lots
+                            ? { ...r, volume: (Number(r.volume) || 0) * 1000 }
+                            : r,
+                    );
+                    raw = raw.concat(trows);
+                } catch {
+                    // 盤前/假日無今日資料 — 歷史照常
+                }
+            }
         }
         const rows: any[] = raw.filter((r: any) => {
             const d = String(r.date ?? '').slice(0, 10);

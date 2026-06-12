@@ -174,6 +174,8 @@ export function tickFromTrade(
                 : 0,
         ),
         simtrade: isTrial,
+        ...(data.isLimitUpPrice === true ? { limit_up: true } : {}),
+        ...(data.isLimitDownPrice === true ? { limit_down: true } : {}),
     };
 }
 

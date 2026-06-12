@@ -100,6 +100,9 @@ export interface SseTick {
     underlying_price?: string;
     intraday_odd?: boolean;
     simtrade?: boolean;
+    /** 最後成交價觸及漲/跌停（API 權威旗標，僅 true 時帶出） */
+    limit_up?: boolean;
+    limit_down?: boolean;
 }
 
 // SSE bidask events (bidask_stk / bidask_fop)

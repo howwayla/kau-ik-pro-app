@@ -38,9 +38,14 @@ function WatchRow({
           : undefined;
 
     const dir = chg === undefined || chg === 0 ? 'flat' : chg > 0 ? 'up' : 'down';
-    // 觸及漲/跌停 → 價格填底色標註（限價資料來自合約檔）
-    const limitHit =
-        close !== undefined && close > 0
+    // 觸及漲/跌停 → 價格填底色標註。優先用 API 權威旗標
+    //（isLimitUpPrice/isLimitDownPrice，涵蓋無漲跌幅限制的特殊商品）；
+    // 無旗標時（mock/快照）退回與合約漲跌停價比對
+    const limitHit = tick?.limit_up
+        ? ('up' as const)
+        : tick?.limit_down
+          ? ('down' as const)
+          : close !== undefined && close > 0
             ? item.contract.limit_up > 0 && close >= item.contract.limit_up
                 ? ('up' as const)
                 : item.contract.limit_down > 0 &&
