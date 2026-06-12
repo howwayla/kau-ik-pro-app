@@ -122,6 +122,18 @@ function loadIndicators(): Set<string> {
     return new Set();
 }
 
+type ChartStyle = 'candle' | 'line';
+
+function loadChartStyle(): ChartStyle {
+    try {
+        if (localStorage.getItem('sj-pro-chart-style') === 'line')
+            return 'line';
+    } catch {
+        // default
+    }
+    return 'candle';
+}
+
 export function CandleChart({
     contract,
     trades = [],
@@ -137,6 +149,8 @@ export function CandleChart({
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
     const volSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+    // 折線模式的收盤價 series（與 K 棒共用右側價格軸，二擇一顯示）
+    const lineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
     const lastBarRef = useRef<Candle | null>(null);
     // 日K以上的當根棒：歷史部分的量（today 的量用 tick.total_volume 疊加）
     const liveVolBaseRef = useRef<{ bucket: number; volume: number } | null>(
@@ -145,6 +159,7 @@ export function CandleChart({
     // 歷史最後一根日K（判斷今日是否已含在歷史內，避免量重複計）
     const lastDailyRef = useRef<{ time: number; volume: number } | null>(null);
     const [tfIdx, setTfIdx] = useState(1); // default 5m
+    const [chartStyle, setChartStyle] = useState<ChartStyle>(loadChartStyle);
     const [empty, setEmpty] = useState(false);
     const quote = useQuote(contract.code);
     const tf = TIMEFRAMES[tfIdx] ?? TIMEFRAMES[1];
@@ -216,6 +231,34 @@ export function CandleChart({
     const contractRef = useRef(contract);
     contractRef.current = contract;
     const lastPriceRef = useRef<number | null>(null);
+    const chartStyleRef = useRef(chartStyle);
+    chartStyleRef.current = chartStyle;
+
+    // 游標 legend：hover 顯示該根棒的開高低收量；未 hover 顯示最新一根
+    const legendRef = useRef<HTMLDivElement>(null);
+    const hoverTimeRef = useRef<number | null>(null);
+    const barsByTimeRef = useRef(new Map<number, Candle>());
+    const paintLegend = (bar: Candle | null) => {
+        const el = legendRef.current;
+        if (!el) return;
+        if (!bar) {
+            el.textContent = '';
+            return;
+        }
+        const c = getChartColors(themeSettingsRef.current);
+        const dir = bar.close >= bar.open ? c.up : c.down;
+        const lab = (s: string) => `<span style="color:${c.text}">${s}</span>`;
+        const val = (n: number) =>
+            `<span style="color:${dir}">${fmtPrice(n)}</span>`;
+        el.innerHTML =
+            `${lab('開')}${val(bar.open)} ${lab('高')}${val(bar.high)} ` +
+            `${lab('低')}${val(bar.low)} ${lab('收')}${val(bar.close)} ` +
+            `${lab('量')}<span style="color:${dir}">${Math.round(
+                bar.volume,
+            ).toLocaleString('en-US')}</span>`;
+    };
+    const paintLegendRef = useRef(paintLegend);
+    paintLegendRef.current = paintLegend;
 
     // chart lifecycle
     useEffect(() => {
@@ -295,9 +338,18 @@ export function CandleChart({
         chart.priceScale('vol').applyOptions({
             scaleMargins: { top: 0.82, bottom: 0 },
         });
+        const closeLine = chart.addSeries(LineSeries, {
+            color: c.crosshair,
+            lineWidth: 2,
+            visible: chartStyleRef.current === 'line',
+        });
+        candles.applyOptions({
+            visible: chartStyleRef.current === 'candle',
+        });
         chartRef.current = chart;
         candleSeriesRef.current = candles;
         volSeriesRef.current = vol;
+        lineSeriesRef.current = closeLine;
 
         chart.subscribeClick((param) => {
             const m = modeRef.current;
@@ -395,6 +447,17 @@ export function CandleChart({
         });
 
         chart.subscribeCrosshairMove((param) => {
+            // 游標 OHLCV legend：滑出圖表或棒區外時回到最新一根
+            if (param.point && param.time !== undefined) {
+                const t = Number(param.time);
+                hoverTimeRef.current = t;
+                paintLegendRef.current(
+                    barsByTimeRef.current.get(t) ?? lastBarRef.current,
+                );
+            } else {
+                hoverTimeRef.current = null;
+                paintLegendRef.current(lastBarRef.current);
+            }
             if (!param.point) return;
             const raw = candles.coordinateToPrice(param.point.y);
             if (raw === null) return;
@@ -407,6 +470,7 @@ export function CandleChart({
             chartRef.current = null;
             candleSeriesRef.current = null;
             volSeriesRef.current = null;
+            lineSeriesRef.current = null;
         };
     }, []);
 
@@ -445,8 +509,25 @@ export function CandleChart({
             wickUpColor: colors.up,
             wickDownColor: colors.down,
         });
+        lineSeriesRef.current?.applyOptions({ color: colors.crosshair });
+        paintLegend(
+            (hoverTimeRef.current !== null
+                ? barsByTimeRef.current.get(hoverTimeRef.current)
+                : null) ?? lastBarRef.current,
+        );
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [themeKey]);
+
+    // K棒 ↔ 折線切換（委託/觸價線掛在活動 series 上，由各自 effect 重掛）
+    useEffect(() => {
+        candleSeriesRef.current?.applyOptions({
+            visible: chartStyle === 'candle',
+        });
+        lineSeriesRef.current?.applyOptions({
+            visible: chartStyle === 'line',
+        });
+        localStorage.setItem('sj-pro-chart-style', chartStyle);
+    }, [chartStyle]);
 
     // load kbars on symbol/timeframe change (and recolor volume on theme change)
     useEffect(() => {
@@ -465,6 +546,8 @@ export function CandleChart({
                 const bars = aggregate(daily, tf.minutes);
                 if (bars.length === 0) {
                     setEmpty(true);
+                    barsByTimeRef.current = new Map();
+                    paintLegend(null);
                     return;
                 }
                 candleSeriesRef.current.setData(
@@ -484,12 +567,25 @@ export function CandleChart({
                             b.close >= b.open ? colors.upVol : colors.downVol,
                     })),
                 );
+                lineSeriesRef.current?.setData(
+                    bars.map((b) => ({
+                        time: b.time as UTCTimestamp,
+                        value: b.close,
+                    })),
+                );
                 lastBarRef.current = bars[bars.length - 1] ?? null;
                 barsRef.current = bars;
+                barsByTimeRef.current = new Map(bars.map((b) => [b.time, b]));
+                hoverTimeRef.current = null;
+                paintLegend(lastBarRef.current);
                 setDataVersion((v) => v + 1);
                 chartRef.current?.timeScale().scrollToRealTime();
             })
-            .catch(() => setEmpty(true));
+            .catch(() => {
+                setEmpty(true);
+                barsByTimeRef.current = new Map();
+                paintLegend(null);
+            });
         return () => {
             cancelled = true;
         };
@@ -577,6 +673,17 @@ export function CandleChart({
             value: bar.volume,
             color: bar.close >= bar.open ? colors.upVol : colors.downVol,
         });
+        lineSeriesRef.current?.update({
+            time: bar.time as UTCTimestamp,
+            value: bar.close,
+        });
+        barsByTimeRef.current.set(bar.time, bar);
+        if (
+            hoverTimeRef.current === null ||
+            hoverTimeRef.current === bar.time
+        ) {
+            paintLegend(bar);
+        }
     }, [tick, contract.code, tf.minutes]);
 
     // overlay indicators
@@ -653,7 +760,11 @@ export function CandleChart({
         ]),
     );
     useEffect(() => {
-        const series = candleSeriesRef.current;
+        // price line 隨可見 series 走：隱藏 series 的 price line 不會渲染
+        const series =
+            chartStyle === 'line'
+                ? lineSeriesRef.current
+                : candleSeriesRef.current;
         if (!series) return;
         const lines = new Map<string, IPriceLine>();
         for (const t of workingOrdersRef.current) {
@@ -677,7 +788,7 @@ export function CandleChart({
             orderLinesRef.current = new Map();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [orderKey, themeKey, contract.code]);
+    }, [orderKey, themeKey, contract.code, chartStyle]);
 
     // drag a line (working order OR stop/take/alert trigger) to reprice it
     useEffect(() => {
@@ -799,10 +910,13 @@ export function CandleChart({
         };
     }, []);
 
-    // draw trigger price lines on the candle series (draggable via the
-    // unified drag handler above; suspended ones render grey)
+    // draw trigger price lines on the visible price series (draggable via
+    // the unified drag handler above; suspended ones render grey)
     useEffect(() => {
-        const series = candleSeriesRef.current;
+        const series =
+            chartStyle === 'line'
+                ? lineSeriesRef.current
+                : candleSeriesRef.current;
         if (!series) return;
         const lines = new Map<string, IPriceLine>();
         for (const t of triggers) {
@@ -842,7 +956,7 @@ export function CandleChart({
             triggerLinesRef.current = new Map();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [JSON.stringify(triggers), themeKey, contract.code]);
+    }, [JSON.stringify(triggers), themeKey, contract.code, chartStyle]);
 
     // position average-price line（持倉均價）
     useEffect(() => {
@@ -909,6 +1023,29 @@ export function CandleChart({
                         {t.label}
                     </button>
                 ))}
+                <span className={styles.toolbarDivider} />
+                <button
+                    className={
+                        styles.tfBtn[
+                            chartStyle === 'candle' ? 'active' : 'normal'
+                        ]
+                    }
+                    title='K 棒圖'
+                    onClick={() => setChartStyle('candle')}
+                >
+                    K
+                </button>
+                <button
+                    className={
+                        styles.tfBtn[
+                            chartStyle === 'line' ? 'active' : 'normal'
+                        ]
+                    }
+                    title='收盤價折線圖（簡化呈現）'
+                    onClick={() => setChartStyle('line')}
+                >
+                    線
+                </button>
                 <span className={styles.toolbarDivider} />
                 {TRADE_MODES.map((m) => (
                     <button
@@ -1075,6 +1212,7 @@ export function CandleChart({
                 </div>
             </div>
             <div ref={hostRef} className={styles.chartHost}>
+                <div ref={legendRef} className={styles.legend} />
                 {empty && (
                     <div className={styles.emptyMsg}>
                         <span className={panel.mono}>無 K 線資料</span>
