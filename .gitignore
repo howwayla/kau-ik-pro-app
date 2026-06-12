@@ -23,7 +23,8 @@ src-tauri/binaries/
 src-tauri/gen/schemas/
 
 # Server
-server/vendor/*.tgz
+# (broker SDK .tgz files in server/vendor/ are committed — redistribution
+# confirmed OK with the providers)
 server/data/
 
 # Broker SDK logs
