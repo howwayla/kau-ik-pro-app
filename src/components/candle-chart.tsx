@@ -167,6 +167,8 @@ export function CandleChart({
     const triggersRef = useRef(triggers);
     triggersRef.current = triggers;
     const triggerLinesRef = useRef(new Map<string, IPriceLine>());
+    // prices the autoscaler should keep visible (trigger lines + position)
+    const scaleLinePricesRef = useRef<number[]>([]);
     const [bracketCfg, setBracketCfg] = useState<ChartBracketSettings>(
         loadBracketSettings,
     );
@@ -257,6 +259,34 @@ export function CandleChart({
             borderDownColor: c.down,
             wickUpColor: c.up,
             wickDownColor: c.down,
+            // stretch the auto-scale to keep stop/take/position lines on
+            // screen — but only within 60% of the data range, so a far-away
+            // line can't squash the candles into a sliver
+            autoscaleInfoProvider: (original: () => {
+                priceRange: { minValue: number; maxValue: number } | null;
+                margins?: { above: number; below: number };
+            } | null) => {
+                const res = original();
+                if (!res?.priceRange) return res;
+                const { minValue, maxValue } = res.priceRange;
+                const span = maxValue - minValue || maxValue * 0.01 || 1;
+                let lo = minValue;
+                let hi = maxValue;
+                for (const price of scaleLinePricesRef.current) {
+                    if (price > 0) {
+                        lo = Math.min(lo, price);
+                        hi = Math.max(hi, price);
+                    }
+                }
+                // stretch cap: anything within daily-limit distance (~12%)
+                // must stay visible; only truly unreachable lines (stale
+                // GTC far away) get clipped so candles aren't squashed
+                const loCap = Math.max(span * 2, minValue * 0.12);
+                const hiCap = Math.max(span * 2, maxValue * 0.12);
+                lo = Math.max(lo, minValue - loCap);
+                hi = Math.min(hi, maxValue + hiCap);
+                return { ...res, priceRange: { minValue: lo, maxValue: hi } };
+            },
         });
         const vol = chart.addSeries(HistogramSeries, {
             priceFormat: { type: 'volume' },
@@ -800,6 +830,13 @@ export function CandleChart({
             );
         }
         triggerLinesRef.current = lines;
+        scaleLinePricesRef.current = [
+            ...triggers.map((t) => t.price),
+            ...(positionRef.current ? [positionRef.current.price] : []),
+        ];
+        chartRef.current
+            ?.priceScale('right')
+            .applyOptions({ autoScale: true }); // re-run the autoscaler
         return () => {
             for (const line of lines.values()) series.removePriceLine(line);
             triggerLinesRef.current = new Map();
