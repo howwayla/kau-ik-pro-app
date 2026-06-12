@@ -184,6 +184,11 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         return this.contractCache.size + (this.optChain?.length ?? 0);
     }
 
+    feedHealth(): 'ws' | 'poll' {
+        // ws marked failed → REST-cache polling only (~10s trigger precision)
+        return Date.now() < this.wsFailedUntil ? 'poll' : 'ws';
+    }
+
     // ---- websocket plumbing ----
 
     private async ensureWs(kind: 'stock' | 'futopt'): Promise<any> {

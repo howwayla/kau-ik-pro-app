@@ -70,6 +70,20 @@ export class MarketManager implements MarketDataProvider, PriceFeed {
         return this.activeName;
     }
 
+    /** trigger-engine precision signal: 'mock' | 'ws' | 'poll' */
+    feedHealth(): 'ws' | 'poll' | 'mock' {
+        if (this.activeName === 'mock') return 'mock';
+        return this.active.feedHealth?.() ?? 'ws';
+    }
+
+    private marketSwapCbs: ((name: MarketName) => void)[] = [];
+
+    /** notified after the market source changes — price bases differ
+     *  between sources, so price-watching consumers must re-baseline */
+    onSourceSwap(cb: (name: MarketName) => void): void {
+        this.marketSwapCbs.push(cb);
+    }
+
     private attach(provider: MarketDataProvider): void {
         provider.onTick((ch, tick) => {
             if (provider !== this.active) return; // stale provider during swap
@@ -106,6 +120,7 @@ export class MarketManager implements MarketDataProvider, PriceFeed {
         this.active = provider;
         this.activeName = name;
         old.dispose();
+        for (const cb of this.marketSwapCbs) cb(name);
     }
 
     // ---- MarketDataProvider delegation ----

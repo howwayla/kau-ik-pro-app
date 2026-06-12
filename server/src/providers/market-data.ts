@@ -77,6 +77,9 @@ export interface MarketDataProvider {
     displayName(code: string): string | undefined;
     /** continuous-month alias resolution (TXFR1 → actual contract code) */
     aliasTarget(code: string): string | undefined;
+    /** live-feed health — 'poll' means WS is down and trigger precision
+     *  degrades to the REST cache TTL (~10s) */
+    feedHealth?(): 'ws' | 'poll' | 'mock';
     /** release timers / sockets when the provider is swapped out */
     dispose(): void;
 }

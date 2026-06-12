@@ -22,6 +22,8 @@ import { MockTradingProvider } from './providers/mock/trading.ts';
 import { TradingManager } from './providers/trading-manager.ts';
 import { RuntimeConfigStore } from './runtime-config.ts';
 import { SseHub } from './sse/hub.ts';
+import { TriggerEngine } from './triggers/engine.ts';
+import { TriggerStore } from './triggers/store.ts';
 import { SubscriptionRegistry } from './sse/subscriptions.ts';
 import { WatchlistStore } from './watchlist-store.ts';
 
@@ -86,14 +88,24 @@ async function main(): Promise<void> {
     );
     if (marketResult.warning) console.warn(marketResult.warning);
 
+    const hub = new SseHub();
+    const triggers = new TriggerEngine(
+        market,
+        trading,
+        hub,
+        new TriggerStore(join(dataDir, 'triggers.json')),
+    );
+    await triggers.start();
+
     const ctx: AppContext = {
         config,
         market,
         trading,
-        hub: new SseHub(),
+        hub,
         subs: new SubscriptionRegistry(market),
         watchlists: new WatchlistStore(join(dataDir, 'watchlists.json')),
         runtimeConfig,
+        triggers,
         startedAt: Date.now(),
     };
 

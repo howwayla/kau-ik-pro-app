@@ -12,6 +12,7 @@ import { registerHealthRoutes } from './routes/health.ts';
 import { registerOrderRoutes } from './routes/orders.ts';
 import { registerPortfolioRoutes } from './routes/portfolio.ts';
 import { registerStreamRoutes } from './routes/stream.ts';
+import { registerTriggerRoutes } from './routes/triggers.ts';
 import { registerWatchlistRoutes } from './routes/watchlist.ts';
 
 export function buildApp(ctx: AppContext): FastifyInstance {
@@ -37,7 +38,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
         reply.header('Access-Control-Allow-Headers', 'Content-Type');
         reply.header(
             'Access-Control-Allow-Methods',
-            'GET, POST, PUT, OPTIONS',
+            'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         );
     });
     app.options('/*', async (_req, reply) => reply.code(204).send());
@@ -49,6 +50,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     registerOrderRoutes(app, ctx);
     registerPortfolioRoutes(app, ctx);
     registerWatchlistRoutes(app, ctx);
+    registerTriggerRoutes(app, ctx);
 
     // serve the built frontend (vite build → dist/) so the app is usable
     // directly on this port — API routes above take precedence. The vite

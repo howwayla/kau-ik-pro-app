@@ -43,6 +43,7 @@ export class TradingManager implements TradingProvider {
     private active!: TradingProvider;
     private activeName: TradeProviderName = 'mock';
     private eventCbs: ((ev: OrderEventData) => void)[] = [];
+    private swapCbs: ((name: TradeProviderName) => void)[] = [];
     private cache = new Map<string, { at: number; value: unknown }>();
 
     private async cachedRead<T>(
@@ -120,6 +121,13 @@ export class TradingManager implements TradingProvider {
         } catch {
             // old session may already be dead
         }
+        for (const cb of this.swapCbs) cb(name);
+    }
+
+    /** notified after the active provider changes (e.g. trigger engine
+     *  suspends protective orders that belong to another broker) */
+    onSwap(cb: (name: TradeProviderName) => void): void {
+        this.swapCbs.push(cb);
     }
 
     // ---- TradingProvider delegation ----

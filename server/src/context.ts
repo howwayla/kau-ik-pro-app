@@ -6,6 +6,7 @@ import type { TradingManager } from './providers/trading-manager.ts';
 import type { RuntimeConfigStore } from './runtime-config.ts';
 import type { SseHub } from './sse/hub.ts';
 import type { SubscriptionRegistry } from './sse/subscriptions.ts';
+import type { TriggerEngine } from './triggers/engine.ts';
 import type { WatchlistStore } from './watchlist-store.ts';
 
 export interface AppContext {
@@ -16,6 +17,7 @@ export interface AppContext {
     subs: SubscriptionRegistry;
     watchlists: WatchlistStore;
     runtimeConfig: RuntimeConfigStore;
+    triggers: TriggerEngine;
     startedAt: number;
 }
 
