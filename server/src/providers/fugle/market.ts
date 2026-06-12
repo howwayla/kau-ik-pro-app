@@ -575,13 +575,37 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         // minute candles ignore from/to and return ~30 days; filter locally
         const timeframe =
             rangeDays <= 5 ? '1' : rangeDays <= 12 ? '5' : rangeDays <= 35 ? '15' : rangeDays <= 70 ? '60' : 'D';
-        const res = await this.rest.stock.historical.candles({
-            symbol,
-            timeframe,
-            sort: 'asc',
-            ...(timeframe === 'D' ? { from: start, to: end } : {}),
-        });
-        const rows: any[] = (res?.data ?? []).filter((r: any) => {
+        let raw: any[] = [];
+        if (timeframe === 'D') {
+            // historical daily candles cap the from/to span at ~1 year per
+            // request — chunk long ranges (weekly/monthly charts) and concat
+            const CHUNK_DAYS = 300;
+            const endMs = new Date(end).getTime();
+            let fromMs = new Date(start).getTime();
+            while (fromMs <= endMs) {
+                const toMs = Math.min(
+                    fromMs + CHUNK_DAYS * 86_400_000,
+                    endMs,
+                );
+                const res = await this.rest.stock.historical.candles({
+                    symbol,
+                    timeframe,
+                    sort: 'asc',
+                    from: new Date(fromMs).toISOString().slice(0, 10),
+                    to: new Date(toMs).toISOString().slice(0, 10),
+                });
+                raw = raw.concat(res?.data ?? []);
+                fromMs = toMs + 86_400_000;
+            }
+        } else {
+            const res = await this.rest.stock.historical.candles({
+                symbol,
+                timeframe,
+                sort: 'asc',
+            });
+            raw = res?.data ?? [];
+        }
+        const rows: any[] = raw.filter((r: any) => {
             const d = String(r.date ?? '').slice(0, 10);
             return d >= start && d <= end;
         });

@@ -33,16 +33,37 @@ export function kbarsToCandles(k: KBars): Candle[] {
 }
 
 // Aggregate 1-minute candles into N-minute or daily bars.
+/** 週K = 10080 分、月K = 43200 分（calendar 對齊，非固定視窗） */
+export const WEEK_MINUTES = 10080;
+export const MONTH_MINUTES = 43200;
+
+const DAY_SEC = 86400;
+
+/** K 棒分桶：分鐘級固定視窗；日=UTC 日；週=錨定週一；月=錨定月初 */
+export function bucketTime(timeSec: number, minutes: number): number {
+    if (minutes >= MONTH_MINUTES) {
+        const d = new Date(timeSec * 1000);
+        return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+    }
+    if (minutes >= WEEK_MINUTES) {
+        const days = Math.floor(timeSec / DAY_SEC);
+        const dow = (days + 4) % 7; // epoch 起算：0=日 … 6=六
+        const offsetToMonday = (dow + 6) % 7;
+        return (days - offsetToMonday) * DAY_SEC;
+    }
+    if (minutes >= 1440) {
+        return Math.floor(timeSec / DAY_SEC) * DAY_SEC;
+    }
+    const bucketSec = minutes * 60;
+    return Math.floor(timeSec / bucketSec) * bucketSec;
+}
+
 export function aggregate(candles: Candle[], minutes: number): Candle[] {
     if (minutes <= 1) return candles;
     const out: Candle[] = [];
     let cur: Candle | null = null;
-    const bucketSec = minutes * 60;
     for (const c of candles) {
-        const bucket =
-            minutes >= 1440
-                ? Math.floor(c.time / 86400) * 86400
-                : Math.floor(c.time / bucketSec) * bucketSec;
+        const bucket = bucketTime(c.time, minutes);
         if (!cur || cur.time !== bucket) {
             if (cur) out.push(cur);
             cur = { ...c, time: bucket };

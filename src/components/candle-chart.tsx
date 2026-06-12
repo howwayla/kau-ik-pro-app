@@ -31,6 +31,7 @@ import { roundToTick } from '../lib/utils/ticksize';
 import { chartFontSize, getChartColors, useThemeSettings } from '../lib/theme-store';
 import {
     aggregate,
+    bucketTime,
     dateStrOffset,
     kbarsToCandles,
     wallClockToUtc,
@@ -44,6 +45,8 @@ const TIMEFRAMES = [
     { label: '15m', minutes: 15, days: 20 },
     { label: '60m', minutes: 60, days: 60 },
     { label: '1D', minutes: 1440, days: 365 },
+    { label: '1W', minutes: 10080, days: 1095 },
+    { label: '1M', minutes: 43200, days: 2920 },
 ] as const;
 
 type TradeMode = 'observe' | 'buy' | 'sell' | 'stop' | 'take' | 'alert';
@@ -371,11 +374,7 @@ export function CandleChart({
         const price = Number(tick.close);
         if (!Number.isFinite(price)) return;
         const tickTime = wallClockToUtc(`${tick.date}T${tick.time}`);
-        const bucketSec = tf.minutes * 60;
-        const bucket =
-            tf.minutes >= 1440
-                ? Math.floor(tickTime / 86400) * 86400
-                : Math.floor(tickTime / bucketSec) * bucketSec;
+        const bucket = bucketTime(tickTime, tf.minutes);
         let bar = lastBarRef.current;
         if (!bar || bucket > bar.time) {
             bar = {
