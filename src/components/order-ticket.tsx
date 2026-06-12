@@ -58,6 +58,9 @@ export function OrderTicket({
     const [armed, setArmed] = useState(false);
     const [busy, setBusy] = useState(false);
     const [bracketOn, setBracketOn] = useState(false);
+    const [bracketLayer, setBracketLayer] = useState<'server' | 'broker'>(
+        'server',
+    );
     const [stopPrice, setStopPrice] = useState('');
     const [takePrice, setTakePrice] = useState('');
     const [feedback, setFeedback] = useState<{
@@ -65,6 +68,11 @@ export function OrderTicket({
         text: string;
     } | null>(null);
     const priceTouched = useRef(false);
+
+    // broker-side condition orders available → default the bracket there
+    useEffect(() => {
+        setBracketLayer(caps.condition_orders ? 'broker' : 'server');
+    }, [caps.condition_orders]);
 
     // reset on symbol change
     useEffect(() => {
@@ -137,6 +145,7 @@ export function OrderTicket({
                     ...(Number.isFinite(sp) && sp > 0 ? { stop: sp } : {}),
                     ...(Number.isFinite(tp) && tp > 0 ? { take: tp } : {}),
                     expiry: 'day',
+                    layer: bracketLayer,
                 };
                 if (bracket.stop === undefined && bracket.take === undefined) {
                     bracket = undefined;
@@ -168,8 +177,10 @@ export function OrderTicket({
                       bracket,
                   );
             setFeedback({
-                kind: 'ok',
-                text: `▸ ${trade.status.status} #${trade.order.seqno || trade.order.id.slice(0, 8)}${trade.protection ? `（保護:${trade.protection === 'broker' ? '券商' : '伺服器'}）` : ''}`,
+                kind: trade.warning ? 'err' : 'ok',
+                text: trade.warning
+                    ? `▸ ${trade.status.status} ⚠ ${trade.warning}`
+                    : `▸ ${trade.status.status} #${trade.order.seqno || trade.order.id.slice(0, 8)}${trade.protection ? `（保護:${trade.protection === 'broker' ? '券商' : '伺服器'}）` : ''}`,
             });
             onPlaced();
         } catch (e) {
@@ -440,6 +451,33 @@ export function OrderTicket({
                             inputMode='decimal'
                             onChange={(e) => setTakePrice(e.target.value)}
                         />
+                    </div>
+                )}
+                {bracketOn && caps.condition_orders && (
+                    <div className={styles.fieldRow}>
+                        <span className={styles.fieldLabel}>保護層</span>
+                        <button
+                            className={
+                                styles.seg[
+                                    bracketLayer === 'broker' ? 'on' : 'off'
+                                ]
+                            }
+                            title='券商端條件單：斷網斷電皆有效（欄位對應未經實戶驗證，失敗自動退本機）'
+                            onClick={() => setBracketLayer('broker')}
+                        >
+                            券商端
+                        </button>
+                        <button
+                            className={
+                                styles.seg[
+                                    bracketLayer === 'server' ? 'on' : 'off'
+                                ]
+                            }
+                            title='本機伺服器觸價：server 跑著就有效'
+                            onClick={() => setBracketLayer('server')}
+                        >
+                            本機
+                        </button>
                     </div>
                 )}
 

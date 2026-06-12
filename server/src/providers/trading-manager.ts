@@ -20,7 +20,13 @@ import type {
     Trade,
 } from '../types/dto.ts';
 import type { ContractKey, MarketClientSource } from './market-data.ts';
-import type { TradingCapabilities, TradingProvider } from './trading.ts';
+import {
+    ConditionOrderError,
+    type BracketSpec,
+    type ConditionOrderRow,
+    type TradingCapabilities,
+    type TradingProvider,
+} from './trading.ts';
 
 // broker account APIs are aggressively rate-limited (fubon 「業務系統流量
 // 控管」, esun AGR0003/AGR0005) — the UI polls every 10s, so reads go
@@ -218,5 +224,59 @@ export class TradingManager implements TradingProvider {
 
     marketdataSource(): MarketClientSource | null {
         return this.active.marketdataSource?.() ?? null;
+    }
+
+    // ---- broker-side condition orders (optional per provider) ----
+
+    async placeStockBracketCondition(
+        key: ContractKey,
+        order: StockOrderReq,
+        bracket: BracketSpec,
+    ): Promise<{ guid: string }> {
+        if (!this.active.placeStockBracketCondition) {
+            throw new ConditionOrderError('此券商不支援條件單');
+        }
+        const res = await this.active.placeStockBracketCondition(
+            key,
+            order,
+            bracket,
+        );
+        this.bustOrderCaches();
+        return res;
+    }
+
+    async placeFuturesBracketCondition(
+        key: ContractKey,
+        order: FuturesOrderReq,
+        bracket: BracketSpec,
+    ): Promise<{ guid: string }> {
+        if (!this.active.placeFuturesBracketCondition) {
+            throw new ConditionOrderError('此券商不支援條件單');
+        }
+        const res = await this.active.placeFuturesBracketCondition(
+            key,
+            order,
+            bracket,
+        );
+        this.bustOrderCaches();
+        return res;
+    }
+
+    listConditionOrders(
+        accountType: AccountTypeName,
+    ): Promise<ConditionOrderRow[]> {
+        if (!this.active.listConditionOrders) return Promise.resolve([]);
+        return this.active.listConditionOrders(accountType);
+    }
+
+    async cancelConditionOrder(
+        guid: string,
+        accountType: AccountTypeName,
+    ): Promise<void> {
+        if (!this.active.cancelConditionOrder) {
+            throw new ConditionOrderError('此券商不支援條件單');
+        }
+        await this.active.cancelConditionOrder(guid, accountType);
+        this.bustOrderCaches();
     }
 }

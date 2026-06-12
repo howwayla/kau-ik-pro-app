@@ -28,6 +28,7 @@ export function registerHealthRoutes(
             ctx.trading.name() === 'mock' || ctx.market.name() === 'mock',
         capabilities: {
             futures_trading: ctx.trading.capabilities().futures,
+            condition_orders: ctx.trading.capabilities().condition_orders,
         },
     }));
 

@@ -1,6 +1,6 @@
 // src/lib/backend.ts — REST client for the local nova-pro-server
 
-import { apiGet, apiPost, apiPut } from './api';
+import { apiDelete, apiGet, apiPost, apiPut } from './api';
 import type {
     ContractBase,
     ContractInfo,
@@ -38,7 +38,7 @@ export interface ServerInfo {
     description: string;
     protocols: string[];
     simulation: boolean;
-    capabilities?: { futures_trading: boolean };
+    capabilities?: { futures_trading: boolean; condition_orders?: boolean };
 }
 
 function contractKey(c: ContractBase) {
@@ -106,6 +106,33 @@ export function setTradeSource(body: {
         market: MarketProviderName;
         warning?: string;
     }>('/api/v1/config/trade', body);
+}
+
+// ---- broker-side condition orders (L1) ----
+
+export interface ConditionOrderRow {
+    guid: string;
+    code: string;
+    action: 'Buy' | 'Sell';
+    price: number | null;
+    quantity: number;
+    account_type: 'S' | 'F';
+    status: string;
+    raw_status: string;
+    tpsl: { stop?: number; take?: number };
+    created: string;
+}
+
+export function fetchConditionOrders() {
+    return apiGet<{ conditions: ConditionOrderRow[] }>(
+        '/api/v1/triggers/conditions',
+    );
+}
+
+export function cancelConditionOrder(guid: string, accountType: 'S' | 'F') {
+    return apiDelete<{ ok: boolean }>(
+        `/api/v1/triggers/conditions/${encodeURIComponent(guid)}?account_type=${accountType}`,
+    );
 }
 
 // ---- health / info / auth ----

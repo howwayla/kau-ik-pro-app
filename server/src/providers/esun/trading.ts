@@ -86,7 +86,7 @@ export class EsunTradingProvider implements TradingProvider {
     }
 
     capabilities() {
-        return { futures: false };
+        return { futures: false, condition_orders: false };
     }
 
     async init(): Promise<void> {

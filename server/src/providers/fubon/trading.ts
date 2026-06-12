@@ -27,11 +27,20 @@ import type {
 import type { Config } from '../../config.ts';
 import type { ContractKey, MarketClientSource } from '../market-data.ts';
 import {
+    ConditionOrderError,
     TradeNotFoundError,
     zeroMargin,
+    type BracketSpec,
+    type ConditionOrderRow,
     type TradingProvider,
 } from '../trading.ts';
 import {
+    buildEntryCondition,
+    buildFutConditionOrder,
+    buildStockConditionOrder,
+    buildTpslWrapper,
+    conditionDates,
+    mapConditionDetail,
     mapFuturesOrder,
     mapOrderStatus,
     mapStockOrder,
@@ -70,7 +79,7 @@ export class FubonTradingProvider implements TradingProvider {
     constructor(private config: Config) {}
 
     capabilities() {
-        return { futures: true };
+        return { futures: true, condition_orders: true };
     }
 
     async init(): Promise<void> {
@@ -675,5 +684,120 @@ export class FubonTradingProvider implements TradingProvider {
         return [...byDate.entries()]
             .map(([date, pnl]) => ({ date, pnl }))
             .sort((a, b) => a.date.localeCompare(b.date));
+    }
+
+    // ---- 券商端條件單（智慧單）— L1 protection -------------------------
+    // Entry order placed AS a condition order with TP/SL children: the
+    // bracket survives both closed tabs AND a dead local server.
+    // All mappings are doc-derived, untested on a real account —
+    // see TODO(verify) in map.ts. Failures throw ConditionOrderError so
+    // routes can fall back to the server trigger engine (L2).
+
+    async placeStockBracketCondition(
+        key: ContractKey,
+        order: StockOrderReq,
+        bracket: BracketSpec,
+    ): Promise<{ guid: string }> {
+        if (!this.stockAccount) {
+            throw new ConditionOrderError('尚未登入證券帳戶');
+        }
+        const { startDate, endDate } = conditionDates(bracket.expiry);
+        let res: FubonResponse<{ guid?: string }>;
+        try {
+            res = this.sdk.stock.singleCondition(
+                this.stockAccount,
+                startDate,
+                endDate,
+                'Full',
+                buildEntryCondition(
+                    key.code,
+                    order.action,
+                    order.price_type === 'MKT' ? null : order.price,
+                ),
+                buildStockConditionOrder(key.code, order),
+                buildTpslWrapper(bracket, false),
+            );
+        } catch (err) {
+            throw new ConditionOrderError(
+                err instanceof Error ? err.message : String(err),
+            );
+        }
+        if (!res?.isSuccess || !res.data?.guid) {
+            throw new ConditionOrderError(
+                `券商條件單失敗: ${res?.message ?? JSON.stringify(res).slice(0, 200)}`,
+            );
+        }
+        return { guid: res.data.guid };
+    }
+
+    async placeFuturesBracketCondition(
+        key: ContractKey,
+        order: FuturesOrderReq,
+        bracket: BracketSpec,
+    ): Promise<{ guid: string }> {
+        if (!this.futAccount) {
+            throw new ConditionOrderError('此帳號未開立期貨戶');
+        }
+        const { startDate, endDate } = conditionDates(bracket.expiry);
+        let res: FubonResponse<{ guid?: string }>;
+        try {
+            res = this.sdk.futopt.singleCondition(
+                this.futAccount,
+                startDate,
+                endDate,
+                'Full',
+                buildEntryCondition(
+                    key.code,
+                    order.action,
+                    order.price_type === 'LMT' ? order.price : null,
+                ),
+                buildFutConditionOrder(
+                    key.code,
+                    key.security_type === 'OPT',
+                    order,
+                ),
+                buildTpslWrapper(bracket, true),
+            );
+        } catch (err) {
+            throw new ConditionOrderError(
+                err instanceof Error ? err.message : String(err),
+            );
+        }
+        if (!res?.isSuccess || !res.data?.guid) {
+            throw new ConditionOrderError(
+                `券商條件單失敗: ${res?.message ?? JSON.stringify(res).slice(0, 200)}`,
+            );
+        }
+        return { guid: res.data.guid };
+    }
+
+    async listConditionOrders(
+        accountType: AccountTypeName,
+    ): Promise<ConditionOrderRow[]> {
+        const account =
+            accountType === 'S' ? this.stockAccount : this.futAccount;
+        if (!account) return [];
+        const api = accountType === 'S' ? this.sdk.stock : this.sdk.futopt;
+        const res = api.getConditionOrder(account);
+        if (!res?.isSuccess) return [];
+        return (res.data ?? []).map((row) =>
+            mapConditionDetail(row, accountType),
+        );
+    }
+
+    async cancelConditionOrder(
+        guid: string,
+        accountType: AccountTypeName,
+    ): Promise<void> {
+        const account =
+            accountType === 'S' ? this.stockAccount : this.futAccount;
+        if (!account) throw new ConditionOrderError('帳戶未登入');
+        const api = accountType === 'S' ? this.sdk.stock : this.sdk.futopt;
+        const res = api.cancelConditionOrders(account, guid);
+        if (!res?.isSuccess) {
+            throw new ConditionOrderError(
+                `撤銷條件單失敗: ${res?.message ?? ''}`,
+            );
+        }
     }
 }

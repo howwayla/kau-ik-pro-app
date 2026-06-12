@@ -61,7 +61,7 @@ export interface ServerInfo {
     description: string;
     protocols: string[];
     simulation: boolean;
-    capabilities: { futures_trading: boolean };
+    capabilities: { futures_trading: boolean; condition_orders: boolean };
 }
 
 // ---- market data ----

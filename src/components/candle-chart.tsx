@@ -21,8 +21,10 @@ import { notify, placeQuickOrder } from '../lib/trade';
 import {
     addTrigger,
     rearmTrigger,
+    removeConditionOrder,
     removeTrigger,
     updateTriggerPrice,
+    useConditionOrders,
     useTriggers,
 } from '../lib/triggers';
 import { closeOrReverse } from '../lib/position-actions';
@@ -157,6 +159,11 @@ export function CandleChart({
     const barsRef = useRef<Candle[]>([]);
     const indSeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
     const triggers = useTriggers().filter((t) => t.code === contract.code);
+    const conditionOrders = useConditionOrders().filter(
+        (c) =>
+            c.code === contract.code ||
+            (contract.target_code && c.code === contract.target_code),
+    );
     const triggersRef = useRef(triggers);
     triggersRef.current = triggers;
     const triggerLinesRef = useRef(new Map<string, IPriceLine>());
@@ -1047,6 +1054,7 @@ export function CandleChart({
                 )}
                 {(workingOrders.length > 0 ||
                     triggers.length > 0 ||
+                    conditionOrders.length > 0 ||
                     position) && (
                     <div className={styles.triggerList}>
                         {position && (
@@ -1193,6 +1201,32 @@ export function CandleChart({
                                         ✕
                                     </button>
                                 </span>
+                            </div>
+                        ))}
+                        {conditionOrders.map((c) => (
+                            <div key={c.guid} className={styles.triggerRow}>
+                                <span title={`券商端條件單 ${c.guid}（${c.raw_status}）`}>
+                                    🏦 {c.action === 'Buy' ? '買' : '賣'}
+                                    {c.quantity}
+                                    {c.price ? ` @${fmtPrice(c.price)}` : ' 市價'}
+                                    {c.tpsl.stop !== undefined &&
+                                        ` 損${fmtPrice(c.tpsl.stop)}`}
+                                    {c.tpsl.take !== undefined &&
+                                        ` 利${fmtPrice(c.tpsl.take)}`}
+                                    {c.status && ` · ${c.status}`}
+                                </span>
+                                <button
+                                    className={styles.triggerRemove}
+                                    title='撤銷券商端條件單'
+                                    onClick={() =>
+                                        void removeConditionOrder(
+                                            c.guid,
+                                            c.account_type,
+                                        )
+                                    }
+                                >
+                                    ✕
+                                </button>
                             </div>
                         ))}
                     </div>

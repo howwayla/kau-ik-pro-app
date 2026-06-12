@@ -274,6 +274,24 @@ export interface FubonSdk {
             orderRes: FubonModifyQuantityObj,
             unblock?: boolean | null,
         ): FubonResponse<FubonOrderResult>;
+        // ---- 條件單（智慧單）— see fubon-neo trade.d.ts Stock class ----
+        singleCondition(
+            account: FubonAccount,
+            startDate: string,
+            endDate: string,
+            stopSign: string,
+            condition: Record<string, unknown>,
+            order: Record<string, unknown>,
+            childInfo?: Record<string, unknown> | null,
+        ): FubonResponse<{ guid?: string }>;
+        getConditionOrder(
+            account: FubonAccount,
+            conditionStatus?: string | null,
+        ): FubonResponse<FubonConditionDetail[]>;
+        cancelConditionOrders(
+            account: FubonAccount,
+            guid: string,
+        ): FubonResponse<string>;
     };
     accounting: {
         inventories(account: FubonAccount): FubonResponse<unknown[]>;
@@ -286,6 +304,25 @@ export interface FubonSdk {
         bankRemain(account: FubonAccount): FubonResponse<FubonBankRemain>;
     };
     futopt: {
+        singleCondition(
+            account: FubonAccount,
+            startDate: string,
+            endDate: string,
+            stopSign: string,
+            condition: Record<string, unknown>,
+            order: Record<string, unknown>,
+            childInfo?: Record<string, unknown> | null,
+        ): FubonResponse<{ guid?: string }>;
+        getConditionOrder(
+            account: FubonAccount,
+            marketType?: string | null,
+            conditionStatus?: string | null,
+        ): FubonResponse<FubonConditionDetail[]>;
+        cancelConditionOrders(
+            account: FubonAccount,
+            guid: string,
+            marketType?: string | null,
+        ): FubonResponse<string>;
         placeOrder(
             account: FubonAccount,
             order: FubonFutOptOrderObject,
@@ -451,4 +488,172 @@ export function mapOrderStatus(
     // 委託中但已有部分成交 → PartFilled
     if (base === 'Submitted' && filledQty > 0) return 'PartFilled';
     return base;
+}
+
+
+// ---- 條件單（智慧單）對應 ----------------------------------------------
+// Written against fubon-neo trade.d.ts type definitions; nothing below has
+// run against a real account yet. TODO(verify) items: date format
+// (assumed YYYYMMDD), stock quantity unit in ConditionOrder (assumed 股),
+// TradingType value for the condition leg (assumed 'Reference'),
+// always-true trigger for market entries, ConditionStatus enum meanings.
+
+export interface FubonConditionDetail {
+    guid: string;
+    symbol: string;
+    conditionSymbol?: string;
+    conditionBuySell?: string;
+    conditionPrice?: string;
+    conditionVolume?: string;
+    action?: string;
+    status?: string;
+    createTime?: string;
+    startDate?: string;
+    tpslRecord?: {
+        conditionPrice?: string;
+        conditionContent?: string;
+        status?: string;
+    }[];
+}
+
+function ymd(d: Date): string {
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function conditionDates(expiry: 'day' | 'gtc'): {
+    startDate: string;
+    endDate: string;
+} {
+    const now = new Date();
+    const start = ymd(now);
+    if (expiry === 'day') return { startDate: start, endDate: start };
+    const end = new Date(now);
+    end.setDate(end.getDate() + 30); // TODO(verify): max validity window
+    return { startDate: start, endDate: ymd(end) };
+}
+
+/** entry condition: trigger when MatchedPrice reaches the entry price
+ *  (market entries use an always-true trigger — fires on next tick) */
+export function buildEntryCondition(
+    symbol: string,
+    action: string,
+    entryPrice: number | null,
+): Record<string, unknown> {
+    if (entryPrice === null || entryPrice <= 0) {
+        // TODO(verify): always-true condition for market-style entries
+        return {
+            marketType: 'Reference',
+            symbol,
+            trigger: 'MatchedPrice',
+            triggerValue: '0.01',
+            comparison: 'GreaterThanOrEqual',
+        };
+    }
+    return {
+        marketType: 'Reference', // TODO(verify): TradingType enum value
+        symbol,
+        trigger: 'MatchedPrice',
+        triggerValue: String(entryPrice),
+        comparison:
+            action === 'Buy' ? 'LessThanOrEqual' : 'GreaterThanOrEqual',
+    };
+}
+
+export function buildStockConditionOrder(
+    symbol: string,
+    o: { action: string; price: number; quantity: number; price_type: string },
+): Record<string, unknown> {
+    return {
+        buySell: o.action,
+        symbol,
+        ...(o.price_type === 'MKT' ? {} : { price: String(o.price) }),
+        // TODO(verify): quantity unit — assumed 股 (shares), like placeOrder
+        quantity: o.quantity * 1000,
+        marketType: 'Common',
+        priceType: o.price_type === 'MKT' ? 'Market' : 'Limit',
+        timeInForce: 'ROD',
+        orderType: 'Stock',
+    };
+}
+
+export function buildFutConditionOrder(
+    symbol: string,
+    isOption: boolean,
+    o: { action: string; price: number; quantity: number; price_type: string },
+): Record<string, unknown> {
+    return {
+        marketType: isOption ? 'Option' : 'Future', // 夜盤 TODO
+        buySell: o.action,
+        symbol,
+        priceType:
+            o.price_type === 'MKT'
+                ? 'Market'
+                : o.price_type === 'MKP'
+                  ? 'RangeMarket'
+                  : 'Limit',
+        ...(o.price_type === 'LMT' ? { price: String(o.price) } : {}),
+        lot: o.quantity,
+        timeInForce: 'ROD',
+        orderType: 'New',
+    };
+}
+
+/** TPSL children: exit at market when stop/take crosses (broker-side OCO) */
+export function buildTpslWrapper(
+    bracket: { stop?: number; take?: number; expiry: 'day' | 'gtc' },
+    isFutOpt: boolean,
+): Record<string, unknown> {
+    const child = (targetPrice: number) => ({
+        timeInForce: 'ROD',
+        priceType: 'Market',
+        orderType: isFutOpt ? 'Close' : 'Stock',
+        targetPrice: String(targetPrice),
+        trigger: 'MatchedPrice',
+    });
+    return {
+        stopSign: 'Full', // TODO(verify): interaction with TPSL children
+        ...(bracket.stop !== undefined ? { sl: child(bracket.stop) } : {}),
+        ...(bracket.take !== undefined ? { tp: child(bracket.take) } : {}),
+        intraday: bracket.expiry === 'day', // TODO(verify)
+        ...(bracket.expiry === 'gtc'
+            ? { endDate: conditionDates('gtc').endDate }
+            : {}),
+    };
+}
+
+const CONDITION_STATUS_LABEL: Record<string, string> = {
+    // TODO(verify): ConditionStatus Type1..Type11 meanings from docs
+    Type1: '監控中',
+    Type2: '已觸發',
+    Type3: '已取消',
+    Type4: '已過期',
+};
+
+export function mapConditionDetail(
+    row: FubonConditionDetail,
+    accountType: 'S' | 'F',
+): import('../trading.ts').ConditionOrderRow {
+    const tpsl: { stop?: number; take?: number } = {};
+    for (const child of row.tpslRecord ?? []) {
+        const p = Number(child.conditionPrice);
+        if (!Number.isFinite(p)) continue;
+        const content = child.conditionContent ?? '';
+        if (content.includes('停損') || content.toLowerCase().includes('sl')) {
+            tpsl.stop = p;
+        } else {
+            tpsl.take = tpsl.take ?? p;
+        }
+    }
+    return {
+        guid: row.guid,
+        code: row.symbol || row.conditionSymbol || '',
+        action: (row.action ?? row.conditionBuySell) === 'Sell' ? 'Sell' : 'Buy',
+        price: Number(row.conditionPrice) || null,
+        quantity: Number(row.conditionVolume) || 0,
+        account_type: accountType,
+        status: CONDITION_STATUS_LABEL[row.status ?? ''] ?? (row.status ?? ''),
+        raw_status: row.status ?? '',
+        tpsl,
+        created: row.createTime ?? row.startDate ?? '',
+    };
 }

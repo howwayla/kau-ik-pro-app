@@ -64,6 +64,41 @@ export function registerTriggerRoutes(
         },
     );
 
+    // ---- broker-side condition orders (L1) ----
+
+    app.get('/api/v1/triggers/conditions', async () => {
+        if (!ctx.trading.capabilities().condition_orders) {
+            return { conditions: [] };
+        }
+        const [s, f] = await Promise.allSettled([
+            ctx.trading.listConditionOrders('S'),
+            ctx.trading.listConditionOrders('F'),
+        ]);
+        return {
+            conditions: [
+                ...(s.status === 'fulfilled' ? s.value : []),
+                ...(f.status === 'fulfilled' ? f.value : []),
+            ],
+        };
+    });
+
+    app.delete<{
+        Params: { guid: string };
+        Querystring: { account_type?: 'S' | 'F' };
+    }>('/api/v1/triggers/conditions/:guid', async (req, reply) => {
+        try {
+            await ctx.trading.cancelConditionOrder(
+                req.params.guid,
+                req.query.account_type ?? 'S',
+            );
+            return { ok: true };
+        } catch (err) {
+            return reply.code(400).send({
+                detail: err instanceof Error ? err.message : String(err),
+            });
+        }
+    });
+
     app.post<{
         Body: {
             triggers: (NewTriggerInput & { legacy_broker?: string })[];

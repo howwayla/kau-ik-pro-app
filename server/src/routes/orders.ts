@@ -3,7 +3,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.ts';
 import type { ContractKey } from '../providers/market-data.ts';
-import { TradeNotFoundError } from '../providers/trading.ts';
+import {
+    ConditionOrderError,
+    TradeNotFoundError,
+} from '../providers/trading.ts';
 import type {
     AccountTypeName,
     FuturesOrderReq,
@@ -48,16 +51,79 @@ export function registerOrderRoutes(
                 });
             }
 
-            const trade = stock_order
-                ? await ctx.trading.placeStockOrder(contract, stock_order)
-                : await ctx.trading.placeFuturesOrder(contract, futures_order!);
-
             const hasBracket =
                 bracket &&
                 (bracket.stop !== undefined ||
                     bracket.take !== undefined ||
                     bracket.stop_offset !== undefined ||
                     bracket.take_offset !== undefined);
+
+            // L1: broker-side condition order with TP/SL children — the
+            // entry itself is the condition order (no plain order placed).
+            // Absolute prices only: offsets need a fill price, which the
+            // broker resolves itself via the TPSL children.
+            let brokerWarning: string | undefined;
+            if (
+                hasBracket &&
+                bracket.layer === 'broker' &&
+                (bracket.stop !== undefined || bracket.take !== undefined)
+            ) {
+                try {
+                    const spec = {
+                        stop: bracket.stop,
+                        take: bracket.take,
+                        expiry: bracket.expiry ?? ('day' as const),
+                    };
+                    const { guid } = stock_order
+                        ? await ctx.trading.placeStockBracketCondition(
+                              contract,
+                              stock_order,
+                              spec,
+                          )
+                        : await ctx.trading.placeFuturesBracketCondition(
+                              contract,
+                              futures_order!,
+                              spec,
+                          );
+                    // synthesized Trade-shaped response so existing UI
+                    // feedback paths keep working
+                    return {
+                        contract: {
+                            ...contract,
+                            target_code: null,
+                        },
+                        order: {
+                            id: `cond-${guid}`,
+                            seqno: '',
+                            ordno: guid.slice(0, 8),
+                            action: order.action,
+                            price: order.price,
+                            quantity: order.quantity,
+                        },
+                        status: {
+                            id: `cond-${guid}`,
+                            status: 'PreSubmitted',
+                            status_code: '00',
+                            order_quantity: order.quantity,
+                            deal_quantity: 0,
+                            cancel_quantity: 0,
+                            modified_price: 0,
+                            msg: '券商端條件單',
+                            deals: [],
+                        },
+                        protection: 'broker' as const,
+                        condition_guid: guid,
+                    };
+                } catch (err) {
+                    if (!(err instanceof ConditionOrderError)) throw err;
+                    brokerWarning = `券商條件單失敗（${err.message}）— 已改用本機伺服器保護`;
+                }
+            }
+
+            const trade = stock_order
+                ? await ctx.trading.placeStockOrder(contract, stock_order)
+                : await ctx.trading.placeFuturesOrder(contract, futures_order!);
+
             if (!hasBracket) return trade;
 
             // L2 server bracket: armed on fill via order events
@@ -76,7 +142,11 @@ export function registerOrderRoutes(
                 expiry: bracket.expiry ?? 'day',
                 accountType: futures_order ? 'F' : 'S',
             });
-            return { ...trade, protection: 'server' as const };
+            return {
+                ...trade,
+                protection: 'server' as const,
+                ...(brokerWarning ? { warning: brokerWarning } : {}),
+            };
         },
     );
 

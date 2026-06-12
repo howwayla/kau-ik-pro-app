@@ -77,7 +77,7 @@ export class MockTradingProvider implements TradingProvider {
     }
 
     capabilities() {
-        return { futures: true };
+        return { futures: true, condition_orders: false };
     }
 
     async accounts(): Promise<Account[]> {

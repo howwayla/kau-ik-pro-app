@@ -5,6 +5,12 @@
 
 import { useSyncExternalStore } from 'react';
 import { apiDelete, apiGet, apiPatch, apiPost } from './api';
+import {
+    cancelConditionOrder as apiCancelCondition,
+    fetchConditionOrders,
+    type ConditionOrderRow,
+} from './backend';
+import { getCapabilities } from './capabilities';
 import { ensureContract } from './contracts-cache';
 import { onStreamReconnected, onTriggerEvent } from './stream';
 import { notify } from './trade';
@@ -58,6 +64,7 @@ interface TriggerEventMsg {
 }
 
 let rows: TriggerRow[] = [];
+let conditions: ConditionOrderRow[] = [];
 let status: TriggerStatus | null = null;
 let statusFailed = false; // server unreachable → protection offline
 const listeners = new Set<() => void>();
@@ -73,6 +80,23 @@ async function refetch() {
         emit();
     } catch {
         // server down — status poll surfaces it
+    }
+}
+
+async function refetchConditions() {
+    if (!getCapabilities().condition_orders) {
+        if (conditions.length > 0) {
+            conditions = [];
+            emit();
+        }
+        return;
+    }
+    try {
+        const res = await fetchConditionOrders();
+        conditions = res.conditions;
+        emit();
+    } catch {
+        // capability may be stale after a broker swap — ignore
     }
 }
 
@@ -228,6 +252,7 @@ export function startTriggerSync() {
     void refetch();
     void refetchStatus();
     void migrateLegacy();
+    void refetchConditions();
     onTriggerEvent((raw) => {
         const ev = raw as TriggerEventMsg;
         toast(ev);
@@ -239,7 +264,10 @@ export function startTriggerSync() {
         void refetch();
         void refetchStatus();
     });
-    const timer = setInterval(() => void refetchStatus(), 15_000);
+    const timer = setInterval(() => {
+        void refetchStatus();
+        void refetchConditions();
+    }, 15_000);
     if (typeof timer === 'object') timer.unref?.();
 }
 
@@ -328,6 +356,39 @@ export async function rearmTrigger(id: string): Promise<void> {
         notify({
             kind: 'err',
             title: '重新啟用失敗',
+            body: e instanceof Error ? e.message : String(e),
+        });
+    }
+}
+
+export function useConditionOrders(): ConditionOrderRow[] {
+    useSyncExternalStore(
+        (l) => {
+            listeners.add(l);
+            return () => listeners.delete(l);
+        },
+        () => conditions,
+    );
+    return conditions;
+}
+
+export async function removeConditionOrder(
+    guid: string,
+    accountType: 'S' | 'F',
+): Promise<void> {
+    try {
+        await apiCancelCondition(guid, accountType);
+        conditions = conditions.filter((c) => c.guid !== guid);
+        emit();
+        notify({
+            kind: 'ok',
+            title: '🗑 條件單撤銷已送出',
+            body: guid.slice(0, 8),
+        });
+    } catch (e) {
+        notify({
+            kind: 'err',
+            title: '條件單撤銷失敗',
             body: e instanceof Error ? e.message : String(e),
         });
     }

@@ -67,7 +67,7 @@ export class NovaTradingProvider implements TradingProvider {
     constructor(private config: Config) {}
 
     capabilities() {
-        return { futures: false };
+        return { futures: false, condition_orders: false };
     }
 
     async init(): Promise<void> {

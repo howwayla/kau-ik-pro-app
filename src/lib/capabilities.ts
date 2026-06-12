@@ -7,6 +7,8 @@ import { useSyncExternalStore } from 'react';
 
 export interface ServerCapabilities {
     futures_trading: boolean;
+    /** broker-side condition orders (L1 protection) — fubon only */
+    condition_orders?: boolean;
 }
 
 let caps: ServerCapabilities = { futures_trading: true };
