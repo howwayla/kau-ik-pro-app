@@ -54,6 +54,11 @@ export function registerDataRoutes(
         ctx.market.kbars(req.body.contract, req.body.start, req.body.end),
     );
 
+    app.post<{ Body: { contract: ContractKey } }>(
+        '/api/v1/data/volumes',
+        async (req) => ctx.market.volumes(req.body.contract),
+    );
+
     app.post<{
         Body: {
             contract: ContractKey;

@@ -92,6 +92,10 @@ export class MockMarketDataProvider implements MarketDataProvider {
         return this.engine.ticks(key.code, date, lastCount);
     }
 
+    async volumes(): Promise<never[]> {
+        return []; // mock 無官方分價量 — 前端 fallback 用逐筆累計
+    }
+
     async scanner(
         type: ScannerType,
         count: number,

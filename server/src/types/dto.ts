@@ -112,6 +112,14 @@ export interface HistoryTicks {
     tick_type: number[];
 }
 
+/** 分價量表一列（官方 intraday/volumes；期貨無內外盤欄位 → at_* 為 0） */
+export interface VolumeLevel {
+    price: number;
+    volume: number;
+    at_bid: number; // 內盤（成交在買方掛單價）
+    at_ask: number; // 外盤（成交在賣方掛單價）
+}
+
 export interface ScannerItem {
     code: string;
     name: string;

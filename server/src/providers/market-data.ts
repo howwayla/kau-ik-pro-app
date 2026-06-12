@@ -4,6 +4,7 @@ import type {
     ContractInfo,
     CreditEnquire,
     HistoryTicks,
+    VolumeLevel,
     KBars,
     OptContract,
     ScannerItem,
@@ -54,6 +55,8 @@ export interface MarketDataProvider {
         date: string,
         lastCount?: number,
     ): Promise<HistoryTicks>;
+    /** 官方分價量表（全日）；不支援的商品/來源回空陣列 */
+    volumes(key: ContractKey): Promise<VolumeLevel[]>;
     scanner(
         type: ScannerType,
         count: number,

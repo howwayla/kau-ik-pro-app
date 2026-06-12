@@ -11,6 +11,7 @@ import type {
     ContractInfo,
     CreditEnquire,
     HistoryTicks,
+    VolumeLevel,
     KBars,
     OptContract,
     ScannerItem,
@@ -160,6 +161,10 @@ export class MarketManager implements MarketDataProvider, PriceFeed {
         lastCount?: number,
     ): Promise<HistoryTicks> {
         return this.active.ticks(key, date, lastCount);
+    }
+
+    volumes(key: ContractKey): Promise<VolumeLevel[]> {
+        return this.active.volumes(key);
     }
 
     scanner(

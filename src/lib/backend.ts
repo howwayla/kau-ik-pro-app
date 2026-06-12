@@ -29,7 +29,7 @@ import type {
     StockPosition,
 } from './types/portfolio';
 import { registerSubscription } from './stream';
-import type { HistoryTicks } from './types/tick';
+import type { HistoryTicks, VolumeLevel } from './types/tick';
 import { todayStr } from './utils/date';
 
 export interface ServerInfo {
@@ -186,6 +186,12 @@ export function fetchHistoryTicks(contract: ContractBase, date: string) {
     return apiPost<HistoryTicks>('/api/v1/data/ticks', {
         contract: contractKey(contract),
         date,
+    });
+}
+
+export function fetchVolumes(contract: ContractBase) {
+    return apiPost<VolumeLevel[]>('/api/v1/data/volumes', {
+        contract: contractKey(contract),
     });
 }
 

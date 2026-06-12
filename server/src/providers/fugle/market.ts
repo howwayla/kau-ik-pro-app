@@ -20,6 +20,7 @@ import type {
     HistoryTicks,
     KBars,
     OptContract,
+    VolumeLevel,
     ScannerItem,
     ScannerType,
     SecurityType,
@@ -788,6 +789,31 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                       : Number(row.changePercent ?? row.change) || 0,
             ),
         );
+    }
+
+    /** 官方分價量表（intraday/volumes，全日交易所級）。期貨無內外盤欄位 */
+    async volumes(key: ContractKey): Promise<VolumeLevel[]> {
+        if (key.security_type === 'IND') return [];
+        const symbol = isContinuousAlias(key.code)
+            ? ((await this.resolveAlias(key.code)) ?? key.code)
+            : toFugleSymbol(key.code);
+        const isFutopt = this.wsKindFor(symbol) === 'futopt';
+        try {
+            const res = isFutopt
+                ? await this.rest.futopt.intraday.volumes({ symbol })
+                : await this.rest.stock.intraday.volumes({ symbol });
+            const rows: any[] = res?.data ?? [];
+            return rows
+                .map((r) => ({
+                    price: Number(r.price) || 0,
+                    volume: Number(r.volume) || 0,
+                    at_bid: Number(r.volumeAtBid) || 0,
+                    at_ask: Number(r.volumeAtAsk) || 0,
+                }))
+                .filter((r) => r.price > 0 && r.volume > 0);
+        } catch {
+            return []; // 前端 fallback 用逐筆累計
+        }
     }
 
     // credit/short-source data has no fugle source — frontend handles empty

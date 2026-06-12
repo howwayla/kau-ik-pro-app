@@ -77,6 +77,12 @@ export const barSell = style({
     opacity: 0.55,
 });
 
+/** 無法判定內外盤的量（集合競價等）— 中性灰段 */
+export const barUnd = style({
+    background: vars.color.mutedForeground,
+    opacity: 0.3,
+});
+
 export const vol = style({
     textAlign: 'right',
     color: vars.color.mutedForeground,
