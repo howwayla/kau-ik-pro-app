@@ -441,7 +441,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         if (type === 'IND') {
             const entry = await this.fetchQuote(toFugleSymbol(code));
             if (entry) {
-                info = this.contractInfo(code, 'IND', 'TSE', entry.state);
+                info = this.contractInfo(code, 'IND', entry.exchange, entry.state);
             }
         } else if (type === 'STK') {
             if (/^[A-Z]/.test(code)) return null; // futures-style code — let FUT fallback handle it
@@ -639,8 +639,8 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             });
             raw = res?.data ?? [];
             // 歷史分K盤後才寫入（今日缺）— 用 intraday candles 補今日。
-            // 單位陷阱：historical volume=股、intraday volume=張（整股），
-            // 統一轉成股再併（興櫃 intraday 本來就是股、指數是金額）
+            // 單位（2026-06-12 同根棒比對驗證）：分K（1/5/15/60）歷史與
+            // 盤中 volume 同單位（整股=張、興櫃=股、指數=金額），直接併
             const localToday = new Date()
                 .toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
             const histHasToday = raw.some(
@@ -652,15 +652,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                         symbol,
                         timeframe,
                     });
-                    const lots =
-                        key.security_type !== 'IND' &&
-                        key.exchange !== 'OES';
-                    const trows = (today?.data ?? []).map((r: any) =>
-                        lots
-                            ? { ...r, volume: (Number(r.volume) || 0) * 1000 }
-                            : r,
-                    );
-                    raw = raw.concat(trows);
+                    raw = raw.concat(today?.data ?? []);
                 } catch {
                     // 盤前/假日無今日資料 — 歷史照常
                 }
@@ -671,7 +663,12 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             return d >= start && d <= end;
         });
         const isIndex = key.security_type === 'IND';
-        return kbarsFromCandles(rows, !isIndex);
+        // 股→張只在「日K（歷史日K volume=股）」與「興櫃分K（=股）」需要；
+        // 上市櫃分K原生就是張，再除 1000 會把量整片砍成 0
+        return kbarsFromCandles(
+            rows,
+            !isIndex && (timeframe === 'D' || key.exchange === 'OES'),
+        );
     }
 
     async ticks(
@@ -812,14 +809,10 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         const symbol = isContinuousAlias(key.code)
             ? ((await this.resolveAlias(key.code)) ?? key.code)
             : toFugleSymbol(key.code);
-        let set = this.subs.get(symbol);
-        if (!set) {
-            set = new Set();
-            this.subs.set(symbol, set);
-        }
-        if (set.has(quote)) return;
-        set.add(quote);
-        // seed day state so the first WS tick has open/high/low context
+        // seed day state so the first WS tick has open/high/low context.
+        // 放在重複訂閱檢查「之前」：首次 seed 可能剛好撞上重啟瞬間失敗，
+        // 前端重新整理會重發 subscribe — 必須讓它能補 seed（fetchQuote
+        // 有 TTL cache，重複呼叫成本低）
         const entry = await this.fetchQuote(symbol);
         // REST quote 已帶最後五檔 — 直接 seed 深度面板，不必等 WS snapshot
         if (quote === 'BidAsk' && entry?.book) {
@@ -832,6 +825,13 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             const channels = this.channelFor(symbol);
             for (const cb of this.bidaskCbs) cb(channels.bidask, bidask);
         }
+        let set = this.subs.get(symbol);
+        if (!set) {
+            set = new Set();
+            this.subs.set(symbol, set);
+        }
+        if (set.has(quote)) return;
+        set.add(quote);
         const ws = await this.ensureWs(this.wsKindFor(symbol));
         ws.subscribe({
             channel: quote === 'Tick' ? 'trades' : 'books',

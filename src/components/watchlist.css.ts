@@ -58,20 +58,34 @@ export const price = style({
     fontVariantNumeric: 'tabular-nums',
 });
 
-/** 觸及漲/跌停：價格填滿底色反白（仿富果 app） */
+/** 觸及漲/跌停：淡色底 + 同向色字（低調標註不搶版面） */
 export const priceLimit = styleVariants({
     up: {
-        background: vars.color.up,
-        color: '#fff',
+        background: `color-mix(in srgb, ${vars.color.up} 16%, transparent)`,
+        color: vars.color.up,
         borderRadius: vars.radius.sm,
         padding: '0 4px',
     },
     down: {
-        background: vars.color.down,
-        color: '#fff',
+        background: `color-mix(in srgb, ${vars.color.down} 16%, transparent)`,
+        color: vars.color.down,
         borderRadius: vars.radius.sm,
         padding: '0 4px',
     },
+});
+
+/** 走勢線開啟時 row 改三欄：代碼 | sparkline | 價格 */
+export const rowSpark = style({
+    gridTemplateColumns: '1fr auto auto',
+});
+
+export const sparkCell = style({
+    gridColumn: 2,
+    gridRow: '1 / span 2',
+    alignSelf: 'center',
+    display: 'flex',
+    alignItems: 'center',
+    width: 64,
 });
 
 export const change = style({

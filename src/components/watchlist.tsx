@@ -1,24 +1,95 @@
 // src/components/watchlist.tsx — live watchlist; click row to select symbol
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuote } from '../hooks/use-stream';
 import type { WatchItem } from '../hooks/use-watchlist';
+import { fetchKbars } from '../lib/backend';
 import { useRegulatoryFlag } from '../lib/regulatory';
 import type { ContractInfo, SecurityType } from '../lib/types/contract';
 import { fmtPct, fmtPrice, fmtSigned } from '../lib/utils/format';
+import { dateStrOffset, kbarsToCandles } from '../lib/utils/kbars';
 import * as panel from './panel.css';
 import * as styles from './watchlist.css';
+
+/** 當日 1 分 K 收盤價迷你走勢線（最後一點用即時價補） */
+function Sparkline({
+    contract,
+    last,
+}: {
+    contract: ContractInfo;
+    last?: number;
+}) {
+    const [closes, setCloses] = useState<number[] | null>(null);
+    useEffect(() => {
+        let dead = false;
+        fetchKbars(contract, dateStrOffset(0), dateStrOffset(0))
+            .then((k) => {
+                if (!dead) {
+                    setCloses(kbarsToCandles(k).map((b) => b.close));
+                }
+            })
+            .catch(() => {
+                if (!dead) setCloses(null);
+            });
+        return () => {
+            dead = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [contract.code]);
+
+    const W = 64;
+    const H = 20;
+    if (!closes || closes.length < 2) {
+        return <span className={styles.sparkCell} />;
+    }
+    const pts = last && last > 0 ? [...closes, last] : closes;
+    const ref = contract.reference;
+    const lo = Math.min(...pts, ref || Infinity);
+    const hi = Math.max(...pts, ref || -Infinity);
+    const span = hi - lo || 1;
+    const y = (v: number) => H - 2 - ((v - lo) / span) * (H - 4);
+    const x = (i: number) => (i / (pts.length - 1)) * (W - 2) + 1;
+    const lastClose = pts[pts.length - 1]!;
+    const dir =
+        !ref || lastClose === ref ? 'flat' : lastClose > ref ? 'up' : 'down';
+    return (
+        <span className={`${styles.sparkCell} ${panel.dirText[dir]}`}>
+            <svg width={W} height={H} aria-hidden='true'>
+                {ref > 0 && (
+                    <line
+                        x1={0}
+                        y1={y(ref)}
+                        x2={W}
+                        y2={y(ref)}
+                        stroke='currentColor'
+                        strokeWidth={1}
+                        strokeDasharray='2 3'
+                        opacity={0.35}
+                    />
+                )}
+                <polyline
+                    fill='none'
+                    stroke='currentColor'
+                    strokeWidth={1.2}
+                    points={pts.map((v, i) => `${x(i)},${y(v)}`).join(' ')}
+                />
+            </svg>
+        </span>
+    );
+}
 
 function WatchRow({
     item,
     selected,
     onSelect,
     onRemove,
+    showSpark,
 }: {
     item: WatchItem;
     selected: boolean;
     onSelect: (c: ContractInfo) => void;
     onRemove: (code: string) => void;
+    showSpark: boolean;
 }) {
     const quote = useQuote(item.contract.code);
     const tick = quote?.tick;
@@ -60,7 +131,9 @@ function WatchRow({
     return (
         <div
             key={`${item.contract.code}-${quote?.flashSeq ?? 0}`}
-            className={`${styles.row[selected ? 'selected' : 'normal']} ${styles.flash[flashDir]}`}
+            className={`${styles.row[selected ? 'selected' : 'normal']} ${
+                showSpark ? styles.rowSpark : ''
+            } ${styles.flash[flashDir]}`}
             onClick={() => onSelect(item.contract)}
         >
             <span className={styles.code}>
@@ -81,6 +154,7 @@ function WatchRow({
                     </span>
                 )}
             </span>
+            {showSpark && <Sparkline contract={item.contract} last={close} />}
             <span
                 className={`${styles.price} ${
                     limitHit
@@ -137,6 +211,16 @@ export function Watchlist({
     const [input, setInput] = useState('');
     const [type, setType] = useState<SecurityType>('STK');
     const [busy, setBusy] = useState(false);
+    const [spark, setSpark] = useState(
+        () => localStorage.getItem('sj-pro-watchlist-spark') === '1',
+    );
+
+    const toggleSpark = () => {
+        setSpark((s) => {
+            localStorage.setItem('sj-pro-watchlist-spark', s ? '0' : '1');
+            return !s;
+        });
+    };
 
     const submit = async () => {
         const code = input.trim().toUpperCase();
@@ -180,6 +264,7 @@ export function Watchlist({
                             selected={item.contract.code === selectedCode}
                             onSelect={onSelect}
                             onRemove={onRemove}
+                            showSpark={spark}
                         />
                     ))}
                 </div>
@@ -202,6 +287,14 @@ export function Watchlist({
                 </select>
                 <button className={panel.btn} onClick={submit} disabled={busy}>
                     +
+                </button>
+                <button
+                    className={panel.btn}
+                    style={spark ? undefined : { opacity: 0.45 }}
+                    title={spark ? '隱藏走勢線' : '顯示當日走勢線'}
+                    onClick={toggleSpark}
+                >
+                    📈
                 </button>
             </div>
         </>
