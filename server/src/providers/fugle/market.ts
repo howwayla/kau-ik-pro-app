@@ -559,7 +559,32 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         return out;
     }
 
+    // long-range (weekly/monthly) charts chunk into many historical
+    // requests — cache results so repeat opens don't burn the 60/min
+    // historical quota (daily data is static intraday)
+    private kbarsCache = new Map<string, { at: number; kbars: KBars }>();
+
     async kbars(key: ContractKey, start: string, end: string): Promise<KBars> {
+        const cacheKey = `${key.code}:${start}:${end}`;
+        const hit = this.kbarsCache.get(cacheKey);
+        // 分鐘級（短區間）盤中會持續長新 K 棒 — 快取縮短到 1 分鐘
+        const spanDays =
+            (new Date(end).getTime() - new Date(start).getTime()) / 86_400_000;
+        const ttl = spanDays <= 70 ? 60_000 : 10 * 60_000;
+        if (hit && Date.now() - hit.at < ttl) return hit.kbars;
+        const out = await this.kbarsUncached(key, start, end);
+        if (out.datetime.length > 0) {
+            if (this.kbarsCache.size > 50) this.kbarsCache.clear();
+            this.kbarsCache.set(cacheKey, { at: Date.now(), kbars: out });
+        }
+        return out;
+    }
+
+    private async kbarsUncached(
+        key: ContractKey,
+        start: string,
+        end: string,
+    ): Promise<KBars> {
         const symbol = isContinuousAlias(key.code)
             ? ((await this.resolveAlias(key.code)) ?? key.code)
             : toFugleSymbol(key.code);
@@ -575,13 +600,68 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         // minute candles ignore from/to and return ~30 days; filter locally
         const timeframe =
             rangeDays <= 5 ? '1' : rangeDays <= 12 ? '5' : rangeDays <= 35 ? '15' : rangeDays <= 70 ? '60' : 'D';
-        const res = await this.rest.stock.historical.candles({
-            symbol,
-            timeframe,
-            sort: 'asc',
-            ...(timeframe === 'D' ? { from: start, to: end } : {}),
-        });
-        const rows: any[] = (res?.data ?? []).filter((r: any) => {
+        let raw: any[] = [];
+        if (timeframe === 'D') {
+            // historical daily candles cap the from/to span at ~1 year per
+            // request — chunk long ranges (weekly/monthly charts) and concat
+            const CHUNK_DAYS = 300;
+            const endMs = new Date(end).getTime();
+            // 官方資料下限：個股 2010、指數 2015 — 更早的段不用打
+            const floorMs = new Date(
+                key.security_type === 'IND' ? '2015-01-01' : '2010-01-01',
+            ).getTime();
+            let fromMs = Math.max(new Date(start).getTime(), floorMs);
+            while (fromMs <= endMs) {
+                const toMs = Math.min(
+                    fromMs + CHUNK_DAYS * 86_400_000,
+                    endMs,
+                );
+                const res = await this.rest.stock.historical.candles({
+                    symbol,
+                    timeframe,
+                    sort: 'asc',
+                    from: new Date(fromMs).toISOString().slice(0, 10),
+                    to: new Date(toMs).toISOString().slice(0, 10),
+                });
+                raw = raw.concat(res?.data ?? []);
+                fromMs = toMs + 86_400_000;
+            }
+        } else {
+            const res = await this.rest.stock.historical.candles({
+                symbol,
+                timeframe,
+                sort: 'asc',
+            });
+            raw = res?.data ?? [];
+            // 歷史分K盤後才寫入（今日缺）— 用 intraday candles 補今日。
+            // 單位陷阱：historical volume=股、intraday volume=張（整股），
+            // 統一轉成股再併（興櫃 intraday 本來就是股、指數是金額）
+            const localToday = new Date()
+                .toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+            const histHasToday = raw.some(
+                (r: any) => String(r.date ?? '').slice(0, 10) === localToday,
+            );
+            if (!histHasToday) {
+                try {
+                    const today = await this.rest.stock.intraday.candles({
+                        symbol,
+                        timeframe,
+                    });
+                    const lots =
+                        key.security_type !== 'IND' &&
+                        key.exchange !== 'OES';
+                    const trows = (today?.data ?? []).map((r: any) =>
+                        lots
+                            ? { ...r, volume: (Number(r.volume) || 0) * 1000 }
+                            : r,
+                    );
+                    raw = raw.concat(trows);
+                } catch {
+                    // 盤前/假日無今日資料 — 歷史照常
+                }
+            }
+        }
+        const rows: any[] = raw.filter((r: any) => {
             const d = String(r.date ?? '').slice(0, 10);
             return d >= start && d <= end;
         });

@@ -38,6 +38,21 @@ function WatchRow({
           : undefined;
 
     const dir = chg === undefined || chg === 0 ? 'flat' : chg > 0 ? 'up' : 'down';
+    // 觸及漲/跌停 → 價格填底色標註。優先用 API 權威旗標
+    //（isLimitUpPrice/isLimitDownPrice，涵蓋無漲跌幅限制的特殊商品）；
+    // 無旗標時（mock/快照）退回與合約漲跌停價比對
+    const limitHit = tick?.limit_up
+        ? ('up' as const)
+        : tick?.limit_down
+          ? ('down' as const)
+          : close !== undefined && close > 0
+            ? item.contract.limit_up > 0 && close >= item.contract.limit_up
+                ? ('up' as const)
+                : item.contract.limit_down > 0 &&
+                    close <= item.contract.limit_down
+                  ? ('down' as const)
+                  : null
+            : null;
     // re-key by flashSeq so the flash animation replays only on real deals
     const flashDir =
         !quote?.flashSeq ? 'none' : quote.lastDir === -1 ? 'down' : 'up';
@@ -66,7 +81,20 @@ function WatchRow({
                     </span>
                 )}
             </span>
-            <span className={`${styles.price} ${panel.dirText[dir]}`}>
+            <span
+                className={`${styles.price} ${
+                    limitHit
+                        ? styles.priceLimit[limitHit]
+                        : panel.dirText[dir]
+                }`}
+                title={
+                    limitHit
+                        ? limitHit === 'up'
+                            ? '漲停'
+                            : '跌停'
+                        : undefined
+                }
+            >
                 {fmtPrice(close)}
             </span>
             <span className={styles.name}>{item.contract.name}</span>

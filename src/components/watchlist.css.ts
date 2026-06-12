@@ -58,6 +58,22 @@ export const price = style({
     fontVariantNumeric: 'tabular-nums',
 });
 
+/** 觸及漲/跌停：價格填滿底色反白（仿富果 app） */
+export const priceLimit = styleVariants({
+    up: {
+        background: vars.color.up,
+        color: '#fff',
+        borderRadius: vars.radius.sm,
+        padding: '0 4px',
+    },
+    down: {
+        background: vars.color.down,
+        color: '#fff',
+        borderRadius: vars.radius.sm,
+        padding: '0 4px',
+    },
+});
+
 export const change = style({
     fontFamily: vars.font.mono,
     fontSize: '0.68rem',
