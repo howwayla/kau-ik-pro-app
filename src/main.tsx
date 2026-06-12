@@ -5,10 +5,10 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
 import { initTheme } from './lib/theme-store';
-import { startTriggerEngine } from './lib/trigger-engine';
+import { startTriggerSync } from './lib/triggers';
 
 initTheme();
-startTriggerEngine();
+startTriggerSync();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

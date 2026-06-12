@@ -218,21 +218,45 @@ export function unsubscribeQuote(
 
 // ---- orders ----
 
-export function placeStockOrder(contract: ContractBase, order: StockOrderReq) {
-    return apiPost<Trade>('/api/v1/order/place_order', {
-        contract: contractKey(contract),
-        stock_order: order,
-    });
+/** optional protective bracket attached to an entry order — armed by the
+ *  server when the order fills (offsets resolve against the fill price) */
+export interface BracketParam {
+    stop?: number;
+    take?: number;
+    stop_offset?: number;
+    take_offset?: number;
+    expiry?: 'day' | 'gtc';
+    layer?: 'server' | 'broker';
+}
+
+export function placeStockOrder(
+    contract: ContractBase,
+    order: StockOrderReq,
+    bracket?: BracketParam,
+) {
+    return apiPost<Trade & { protection?: string; warning?: string }>(
+        '/api/v1/order/place_order',
+        {
+            contract: contractKey(contract),
+            stock_order: order,
+            ...(bracket ? { bracket } : {}),
+        },
+    );
 }
 
 export function placeFuturesOrder(
     contract: ContractBase,
     order: FuturesOrderReq,
+    bracket?: BracketParam,
 ) {
-    return apiPost<Trade>('/api/v1/order/place_order', {
-        contract: contractKey(contract),
-        futures_order: order,
-    });
+    return apiPost<Trade & { protection?: string; warning?: string }>(
+        '/api/v1/order/place_order',
+        {
+            contract: contractKey(contract),
+            futures_order: order,
+            ...(bracket ? { bracket } : {}),
+        },
+    );
 }
 
 export function cancelOrder(tradeId: string) {

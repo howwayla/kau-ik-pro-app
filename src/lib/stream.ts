@@ -36,6 +36,8 @@ let lastHeartbeat = 0;
 const quoteListeners = new Map<string, Set<Listener>>();
 const statusListeners = new Set<Listener>();
 const orderEventListeners = new Set<(ev: OrderEventData) => void>();
+const triggerEventListeners = new Set<(ev: unknown) => void>();
+const reconnectListeners = new Set<() => void>();
 const tickTapeListeners = new Set<(tick: SseTick) => void>();
 
 function emitQuote(code: string) {
@@ -147,6 +149,7 @@ function connect() {
         if (everDown) {
             everDown = false;
             void resubscribeAll(); // server may have restarted — replay subs
+            reconnectListeners.forEach((l) => l()); // stores refetch missed events
         }
     };
 
@@ -156,6 +159,14 @@ function connect() {
     for (const ev of ['bidask_stk', 'bidask_fop']) {
         es.addEventListener(ev, (e) => handleBidAsk((e as MessageEvent).data));
     }
+    es.addEventListener('trigger_event', (e) => {
+        try {
+            const data = JSON.parse((e as MessageEvent).data);
+            triggerEventListeners.forEach((l) => l(data));
+        } catch {
+            // malformed frame
+        }
+    });
     es.addEventListener('order_event', (e) => {
         const data = JSON.parse((e as MessageEvent).data) as OrderEventData;
         orderEventListeners.forEach((l) => l(data));
@@ -221,6 +232,22 @@ export function onOrderEvent(listener: (ev: OrderEventData) => void) {
     orderEventListeners.add(listener);
     return () => {
         orderEventListeners.delete(listener);
+    };
+}
+
+export function onTriggerEvent(listener: (ev: unknown) => void) {
+    triggerEventListeners.add(listener);
+    return () => {
+        triggerEventListeners.delete(listener);
+    };
+}
+
+/** fires after the SSE stream recovers from a disconnect — consumers
+ *  should refetch state that is normally kept fresh by events */
+export function onStreamReconnected(listener: () => void) {
+    reconnectListeners.add(listener);
+    return () => {
+        reconnectListeners.delete(listener);
     };
 }
 

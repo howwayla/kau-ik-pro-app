@@ -22,7 +22,7 @@ import {
     addTrigger,
     removeTrigger,
     useTriggers,
-} from '../lib/trigger-engine';
+} from '../lib/triggers';
 import type { ContractBase } from '../lib/types/contract';
 import type { Candle } from '../lib/types/market';
 import { ACTIVE_ORDER_STATUSES, type Trade } from '../lib/types/order';
@@ -239,8 +239,8 @@ export function CandleChart({
             }
             const below = price <= last;
             if (m === 'alert') {
-                addTrigger({
-                    code: c.code,
+                void addTrigger({
+                    contract: c,
                     condition: below ? 'below' : 'above',
                     price,
                     action: 'Sell', // unused for alerts
@@ -250,8 +250,8 @@ export function CandleChart({
                 return;
             }
             if (m === 'stop') {
-                addTrigger({
-                    code: c.code,
+                void addTrigger({
+                    contract: c,
                     condition: below ? 'below' : 'above',
                     price,
                     action: below ? 'Sell' : 'Buy',
@@ -259,8 +259,8 @@ export function CandleChart({
                     kind: 'stop',
                 });
             } else {
-                addTrigger({
-                    code: c.code,
+                void addTrigger({
+                    contract: c,
                     condition: below ? 'below' : 'above',
                     price,
                     action: below ? 'Buy' : 'Sell',
@@ -846,7 +846,7 @@ export function CandleChart({
                                 </span>
                                 <button
                                     className={styles.triggerRemove}
-                                    onClick={() => removeTrigger(t.id)}
+                                    onClick={() => void removeTrigger(t.id)}
                                 >
                                     ✕
                                 </button>

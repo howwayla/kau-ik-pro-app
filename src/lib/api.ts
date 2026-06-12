@@ -48,3 +48,23 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
     }
     return res.json() as Promise<T>;
 }
+
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(base + path, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        await fail(res);
+    }
+    return res.json() as Promise<T>;
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+    const res = await fetch(base + path, { method: 'DELETE' });
+    if (!res.ok) {
+        await fail(res);
+    }
+    return res.json() as Promise<T>;
+}

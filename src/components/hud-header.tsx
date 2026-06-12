@@ -19,8 +19,8 @@ import {
     type TradeProviderName,
 } from '../lib/backend';
 import { setCapabilities } from '../lib/capabilities';
+import { useTriggerStatus } from '../lib/triggers';
 import { SENSITIVE, setPrivacy, usePrivacy } from '../lib/privacy';
-import { setActiveBroker } from '../lib/trigger-engine';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
     setThemeSettings,
@@ -351,7 +351,6 @@ function BrokerMenu() {
             .then((cfg) => {
                 setConfig(cfg);
                 // scope client-side stop/take triggers to this broker
-                setActiveBroker(cfg.provider);
             })
             .catch(() => setConfig(null));
     }, []);
@@ -574,6 +573,44 @@ function BrokerMenu() {
                 </>
             )}
         </Menu>
+    );
+}
+
+/** server trigger-engine health: protective orders live in the local
+ *  server — closing the tab is fine, a dead server is not. */
+function ProtectionPill() {
+    const { status, offline } = useTriggerStatus();
+    if (offline) {
+        return (
+            <div
+                className={styles.chip}
+                title='本機伺服器離線 — 停損/停利觸價保護已停止'
+            >
+                <span className={styles.led.down} />
+                <span>保護離線</span>
+            </div>
+        );
+    }
+    if (!status) return null;
+    const degraded = status.feed_mode === 'poll';
+    const count = status.active + status.pending_brackets;
+    return (
+        <div
+            className={styles.chip}
+            title={
+                degraded
+                    ? (status.feed_warning ?? 'WS 降級 — 觸價精度下降')
+                    : `伺服器觸價保護運作中：${status.active} 筆觸價單、${status.pending_brackets} 筆待掛括號${status.suspended ? `、${status.suspended} 筆已暫停` : ''}`
+            }
+        >
+            <span
+                className={styles.led[degraded ? 'connecting' : 'live']}
+            />
+            <span>
+                保護 {count}
+                {status.suspended > 0 ? ` ⏸${status.suspended}` : ''}
+            </span>
+        </div>
     );
 }
 
@@ -869,6 +906,8 @@ export function HudHeader({
                 <span className={styles.led[streamStatus]} />
                 <span>{STATUS_LABEL[streamStatus]}</span>
             </div>
+
+            <ProtectionPill />
 
             <ServerManager
                 open={serverMgrOpen}

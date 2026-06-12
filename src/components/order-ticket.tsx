@@ -4,11 +4,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { TICKET_ACTION_EVENT } from '../hooks/use-hotkeys';
 import { useQuote } from '../hooks/use-stream';
-import { registerBracket } from '../lib/bracket';
 import { useCapabilities } from '../lib/capabilities';
 import { usePickedPrice } from '../lib/price-sync';
 import { checkOrderAllowed } from '../lib/risk';
-import { placeFuturesOrder, placeStockOrder } from '../lib/backend';
+import {
+    placeFuturesOrder,
+    placeStockOrder,
+    type BracketParam,
+} from '../lib/backend';
 import type { ContractInfo } from '../lib/types/contract';
 import type {
     Action,
@@ -124,41 +127,50 @@ export function OrderTicket({
             if (priceType === 'LMT' && (!Number.isFinite(p) || p <= 0)) {
                 throw new Error('限價單需要有效價格');
             }
-            const trade = isFutures
-                ? await placeFuturesOrder(contract, {
-                      action,
-                      price: p,
-                      quantity: qty,
-                      price_type: priceType as 'LMT' | 'MKT' | 'MKP',
-                      order_type: orderType,
-                      octype,
-                  })
-                : await placeStockOrder(contract, {
-                      action,
-                      price: p,
-                      quantity: qty,
-                      price_type: priceType as 'LMT' | 'MKT',
-                      order_type: orderType,
-                      order_lot: orderLot,
-                  });
-            setFeedback({
-                kind: 'ok',
-                text: `▸ ${trade.status.status} #${trade.order.seqno || trade.order.id.slice(0, 8)}`,
-            });
+            // protective bracket rides along with the order — the SERVER
+            // arms the OCO stop/take when the entry fills
+            let bracket: BracketParam | undefined;
             if (bracketOn) {
                 const sp = Number(stopPrice);
                 const tp = Number(takePrice);
-                registerBracket({
-                    orderId: trade.order.id,
-                    seqno: trade.order.seqno,
-                    code: contract.code,
-                    action,
-                    quantity: qty,
-                    stopPrice: Number.isFinite(sp) && sp > 0 ? sp : null,
-                    takePrice: Number.isFinite(tp) && tp > 0 ? tp : null,
-                    accountType: isFutures ? 'F' : 'S',
-                });
+                bracket = {
+                    ...(Number.isFinite(sp) && sp > 0 ? { stop: sp } : {}),
+                    ...(Number.isFinite(tp) && tp > 0 ? { take: tp } : {}),
+                    expiry: 'day',
+                };
+                if (bracket.stop === undefined && bracket.take === undefined) {
+                    bracket = undefined;
+                }
             }
+            const trade = isFutures
+                ? await placeFuturesOrder(
+                      contract,
+                      {
+                          action,
+                          price: p,
+                          quantity: qty,
+                          price_type: priceType as 'LMT' | 'MKT' | 'MKP',
+                          order_type: orderType,
+                          octype,
+                      },
+                      bracket,
+                  )
+                : await placeStockOrder(
+                      contract,
+                      {
+                          action,
+                          price: p,
+                          quantity: qty,
+                          price_type: priceType as 'LMT' | 'MKT',
+                          order_type: orderType,
+                          order_lot: orderLot,
+                      },
+                      bracket,
+                  );
+            setFeedback({
+                kind: 'ok',
+                text: `▸ ${trade.status.status} #${trade.order.seqno || trade.order.id.slice(0, 8)}${trade.protection ? `（保護:${trade.protection === 'broker' ? '券商' : '伺服器'}）` : ''}`,
+            });
             onPlaced();
         } catch (e) {
             setFeedback({
