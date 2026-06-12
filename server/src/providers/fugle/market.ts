@@ -816,15 +816,19 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         // 有 TTL cache，重複呼叫成本低）
         const entry = await this.fetchQuote(symbol);
         // REST quote 已帶最後五檔 — 直接 seed 深度面板，不必等 WS snapshot
-        if (quote === 'BidAsk' && entry?.book) {
-            const bidask = bidaskFromBooks(symbol, {
-                bids: entry.book.bids,
-                asks: entry.book.asks,
-            });
-            const appCode = fromFugleSymbol(symbol);
-            if (appCode !== symbol) bidask.code = appCode;
-            const channels = this.channelFor(symbol);
-            for (const cb of this.bidaskCbs) cb(channels.bidask, bidask);
+        if (quote === 'BidAsk') {
+            if (entry?.book) {
+                this.pushBookSeed(symbol, entry.book);
+            } else {
+                // 暫時性失敗（剛重啟、上游瞬斷）：稍後自動補 seed，
+                // 不讓深度面板停在空白等用戶重整
+                setTimeout(() => {
+                    if (!this.subs.get(symbol)?.has('BidAsk')) return;
+                    void this.fetchQuote(symbol).then((e) => {
+                        if (e?.book) this.pushBookSeed(symbol, e.book);
+                    });
+                }, 3000);
+            }
         }
         let set = this.subs.get(symbol);
         if (!set) {
@@ -838,6 +842,20 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             channel: quote === 'Tick' ? 'trades' : 'books',
             symbol,
         });
+    }
+
+    private pushBookSeed(
+        symbol: string,
+        book: { bids: unknown[]; asks: unknown[] },
+    ): void {
+        const bidask = bidaskFromBooks(symbol, {
+            bids: book.bids,
+            asks: book.asks,
+        });
+        const appCode = fromFugleSymbol(symbol);
+        if (appCode !== symbol) bidask.code = appCode;
+        const channels = this.channelFor(symbol);
+        for (const cb of this.bidaskCbs) cb(channels.bidask, bidask);
     }
 
     async unsubscribe(key: ContractKey, quote: StreamQuoteType): Promise<void> {

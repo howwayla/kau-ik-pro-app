@@ -119,17 +119,27 @@ export function registerSubscription(body: {
     subscriptionRegistry.set(`${body.code}:${body.quote_type}`, body);
 }
 
-async function resubscribeAll() {
+async function resubscribeAll(attempt = 0) {
+    let failed = false;
     for (const body of subscriptionRegistry.values()) {
         try {
-            await fetch(`${base}/api/v1/stream/subscribe`, {
+            const res = await fetch(`${base}/api/v1/stream/subscribe`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
+            if (!res.ok) failed = true;
         } catch {
-            // server still down — next reconnect will retry
+            failed = true;
         }
+    }
+    // server 重啟瞬間 POST 可能落空，且連線若已恢復就不會再有
+    // onopen 來補發 — 自己重試，不能等用戶手動重整
+    if (failed && attempt < 5) {
+        setTimeout(
+            () => void resubscribeAll(attempt + 1),
+            2000 * (attempt + 1),
+        );
     }
 }
 
