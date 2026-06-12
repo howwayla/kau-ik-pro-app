@@ -320,6 +320,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 });
             }
             const tick = tickFromTrade(symbol, data, state);
+            if (!tick) return; // 無可用價格的 frame（如收盤總結）不發送
             const appCode = fromFugleSymbol(symbol);
             if (appCode !== symbol) tick.code = appCode;
             for (const cb of this.tickCbs) cb(channels.tick, tick);

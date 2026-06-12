@@ -126,25 +126,32 @@ export function snapshotFromState(
     };
 }
 
-/** WS trades message → SseTick (decimal fields as strings) */
+/**
+ * WS trades message → SseTick (decimal fields as strings)。
+ * 收盤/總結 frame 可能帶 price=0（期貨 13:45 觀察到）— 此時退回
+ * state.last 當價格；完全沒有可用價格回 null（呼叫端跳過發送），
+ * 否則前端會顯示 0 元、-100%
+ */
 export function tickFromTrade(
     symbol: string,
     data: any,
     state: DayState,
-): SseTick {
-    const price = num(data.price);
+): SseTick | null {
+    const rawPrice = num(data.price);
     const { date, time } = splitTime(data.time);
     const isTrial = data.isTrial === true;
-    if (!isTrial && price > 0) {
-        state.last = price;
-        if (state.open === 0) state.open = price;
-        state.high = Math.max(state.high, price);
-        state.low = state.low === 0 ? price : Math.min(state.low, price);
+    if (!isTrial && rawPrice > 0) {
+        state.last = rawPrice;
+        if (state.open === 0) state.open = rawPrice;
+        state.high = Math.max(state.high, rawPrice);
+        state.low = state.low === 0 ? rawPrice : Math.min(state.low, rawPrice);
         state.totalVolume = num(data.volume) || state.totalVolume;
         state.lastUpdatedMs = Date.now();
     }
     if (num(data.bid) > 0) state.bid = num(data.bid);
     if (num(data.ask) > 0) state.ask = num(data.ask);
+    const price = rawPrice > 0 ? rawPrice : state.last;
+    if (price <= 0) return null;
     const chg = price - state.reference;
     return {
         code: symbol,

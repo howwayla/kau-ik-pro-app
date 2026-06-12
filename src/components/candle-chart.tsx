@@ -152,6 +152,10 @@ export function CandleChart({
     // 折線模式的收盤價 series（與 K 棒共用右側價格軸，二擇一顯示）
     const lineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
     const lastBarRef = useRef<Candle | null>(null);
+    // 換 symbol/timeframe 載入期間擋住 live tick 寫入：此時 series 還掛著
+    // 舊 timeframe 的資料，用新 timeframe 的分桶時間 update 會因「時間
+    // 倒退」讓 lightweight-charts 直接 throw → 整頁黑屏
+    const loadingRef = useRef(true);
     // 日K以上的當根棒：歷史部分的量（today 的量用 tick.total_volume 疊加）
     const liveVolBaseRef = useRef<{ bucket: number; volume: number } | null>(
         null,
@@ -532,6 +536,7 @@ export function CandleChart({
     // load kbars on symbol/timeframe change (and recolor volume on theme change)
     useEffect(() => {
         let cancelled = false;
+        loadingRef.current = true;
         lastBarRef.current = null;
         liveVolBaseRef.current = null;
         setEmpty(false);
@@ -546,8 +551,15 @@ export function CandleChart({
                 const bars = aggregate(daily, tf.minutes);
                 if (bars.length === 0) {
                     setEmpty(true);
+                    // 清掉舊 timeframe 的 series 資料再放行 live tick，
+                    // 否則 tick 自建新棒會撞舊資料的時間軸
+                    candleSeriesRef.current.setData([]);
+                    volSeriesRef.current?.setData([]);
+                    lineSeriesRef.current?.setData([]);
+                    barsRef.current = [];
                     barsByTimeRef.current = new Map();
                     paintLegend(null);
+                    loadingRef.current = false;
                     return;
                 }
                 candleSeriesRef.current.setData(
@@ -578,13 +590,20 @@ export function CandleChart({
                 barsByTimeRef.current = new Map(bars.map((b) => [b.time, b]));
                 hoverTimeRef.current = null;
                 paintLegend(lastBarRef.current);
+                loadingRef.current = false;
                 setDataVersion((v) => v + 1);
                 chartRef.current?.timeScale().scrollToRealTime();
             })
             .catch(() => {
+                if (cancelled) return;
                 setEmpty(true);
+                candleSeriesRef.current?.setData([]);
+                volSeriesRef.current?.setData([]);
+                lineSeriesRef.current?.setData([]);
+                barsRef.current = [];
                 barsByTimeRef.current = new Map();
                 paintLegend(null);
+                loadingRef.current = false;
             });
         return () => {
             cancelled = true;
@@ -601,6 +620,7 @@ export function CandleChart({
     useEffect(() => {
         if (!tick || tick.code !== contract.code) return;
         if (tick.simtrade) return; // 試撮 never paints into candles
+        if (loadingRef.current) return; // 載入中：series 還是舊資料，不可寫
         const series = candleSeriesRef.current;
         if (!series) return;
         const price = Number(tick.close);
