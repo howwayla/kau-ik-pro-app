@@ -94,6 +94,12 @@ export function CandleChart({
     const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
     const volSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
     const lastBarRef = useRef<Candle | null>(null);
+    // 日K以上的當根棒：歷史部分的量（today 的量用 tick.total_volume 疊加）
+    const liveVolBaseRef = useRef<{ bucket: number; volume: number } | null>(
+        null,
+    );
+    // 歷史最後一根日K（判斷今日是否已含在歷史內，避免量重複計）
+    const lastDailyRef = useRef<{ time: number; volume: number } | null>(null);
     const [tfIdx, setTfIdx] = useState(1); // default 5m
     const [empty, setEmpty] = useState(false);
     const quote = useQuote(contract.code);
@@ -322,11 +328,17 @@ export function CandleChart({
     useEffect(() => {
         let cancelled = false;
         lastBarRef.current = null;
+        liveVolBaseRef.current = null;
         setEmpty(false);
         fetchKbars(contract, dateStrOffset(tf.days), dateStrOffset(0))
             .then((k) => {
                 if (cancelled || !candleSeriesRef.current) return;
-                const bars = aggregate(kbarsToCandles(k), tf.minutes);
+                const daily = kbarsToCandles(k);
+                const lastRaw = daily[daily.length - 1];
+                lastDailyRef.current = lastRaw
+                    ? { time: lastRaw.time, volume: lastRaw.volume }
+                    : null;
+                const bars = aggregate(daily, tf.minutes);
                 if (bars.length === 0) {
                     setEmpty(true);
                     return;
@@ -376,15 +388,52 @@ export function CandleChart({
         const tickTime = wallClockToUtc(`${tick.date}T${tick.time}`);
         const bucket = bucketTime(tickTime, tf.minutes);
         let bar = lastBarRef.current;
+        const dailyPlus = tf.minutes >= 1440; // 日/週/月
+        // 日K以上用 tick 自帶的「日內」開高低與總量合成今日部分，
+        // 量 = 歷史部分 + 今日總量（不靠逐筆累加，避免漏掉訂閱前的量）
+        const dayOpen = Number(tick.open) || price;
+        const dayHigh = Number(tick.high) || price;
+        const dayLow = Number(tick.low) || price;
         if (!bar || bucket > bar.time) {
-            bar = {
-                time: bucket,
-                open: price,
-                high: price,
-                low: price,
-                close: price,
-                volume: tick.volume,
-            };
+            bar = dailyPlus
+                ? {
+                      time: bucket,
+                      open: dayOpen,
+                      high: dayHigh,
+                      low: dayLow,
+                      close: price,
+                      volume: tick.total_volume,
+                  }
+                : {
+                      time: bucket,
+                      open: price,
+                      high: price,
+                      low: price,
+                      close: price,
+                      volume: tick.volume,
+                  };
+            liveVolBaseRef.current = { bucket, volume: 0 };
+        } else if (dailyPlus) {
+            if (
+                !liveVolBaseRef.current ||
+                liveVolBaseRef.current.bucket !== bucket
+            ) {
+                // 第一筆今日 tick：base = 歷史量；若歷史已含今日
+                //（收盤後重開圖），先扣掉那根的量避免重複計
+                const last = lastDailyRef.current;
+                const todayBucket = bucketTime(tickTime, 1440);
+                const histIncludesToday =
+                    last && bucketTime(last.time, 1440) === todayBucket;
+                liveVolBaseRef.current = {
+                    bucket,
+                    volume:
+                        bar.volume - (histIncludesToday ? last.volume : 0),
+                };
+            }
+            bar.high = Math.max(bar.high, dayHigh);
+            bar.low = Math.min(bar.low, dayLow);
+            bar.close = price;
+            bar.volume = liveVolBaseRef.current.volume + tick.total_volume;
         } else {
             bar.high = Math.max(bar.high, price);
             bar.low = Math.min(bar.low, price);
