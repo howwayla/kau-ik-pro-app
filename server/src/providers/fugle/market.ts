@@ -559,7 +559,28 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         return out;
     }
 
+    // long-range (weekly/monthly) charts chunk into many historical
+    // requests — cache results so repeat opens don't burn the 60/min
+    // historical quota (daily data is static intraday)
+    private kbarsCache = new Map<string, { at: number; kbars: KBars }>();
+
     async kbars(key: ContractKey, start: string, end: string): Promise<KBars> {
+        const cacheKey = `${key.code}:${start}:${end}`;
+        const hit = this.kbarsCache.get(cacheKey);
+        if (hit && Date.now() - hit.at < 10 * 60_000) return hit.kbars;
+        const out = await this.kbarsUncached(key, start, end);
+        if (out.datetime.length > 0) {
+            if (this.kbarsCache.size > 50) this.kbarsCache.clear();
+            this.kbarsCache.set(cacheKey, { at: Date.now(), kbars: out });
+        }
+        return out;
+    }
+
+    private async kbarsUncached(
+        key: ContractKey,
+        start: string,
+        end: string,
+    ): Promise<KBars> {
         const symbol = isContinuousAlias(key.code)
             ? ((await this.resolveAlias(key.code)) ?? key.code)
             : toFugleSymbol(key.code);
@@ -581,7 +602,11 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             // request — chunk long ranges (weekly/monthly charts) and concat
             const CHUNK_DAYS = 300;
             const endMs = new Date(end).getTime();
-            let fromMs = new Date(start).getTime();
+            // 官方資料下限：個股 2010、指數 2015 — 更早的段不用打
+            const floorMs = new Date(
+                key.security_type === 'IND' ? '2015-01-01' : '2010-01-01',
+            ).getTime();
+            let fromMs = Math.max(new Date(start).getTime(), floorMs);
             while (fromMs <= endMs) {
                 const toMs = Math.min(
                     fromMs + CHUNK_DAYS * 86_400_000,

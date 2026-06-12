@@ -45,8 +45,8 @@ const TIMEFRAMES = [
     { label: '15m', minutes: 15, days: 20 },
     { label: '60m', minutes: 60, days: 60 },
     { label: '1D', minutes: 1440, days: 365 },
-    { label: '1W', minutes: 10080, days: 1095 },
-    { label: '1M', minutes: 43200, days: 2920 },
+    { label: '1W', minutes: 10080, days: 3650 },
+    { label: '1M', minutes: 43200, days: 6000 },
 ] as const;
 
 type TradeMode = 'observe' | 'buy' | 'sell' | 'stop' | 'take' | 'alert';
