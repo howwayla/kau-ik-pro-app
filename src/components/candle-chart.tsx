@@ -20,9 +20,14 @@ import { setPickedPrice } from '../lib/price-sync';
 import { notify, placeQuickOrder } from '../lib/trade';
 import {
     addTrigger,
+    rearmTrigger,
     removeTrigger,
+    updateTriggerPrice,
     useTriggers,
 } from '../lib/triggers';
+import { closeOrReverse } from '../lib/position-actions';
+import type { Position } from '../lib/types/portfolio';
+import { contractMultiplier } from '../lib/utils/multiplier';
 import type { ContractBase } from '../lib/types/contract';
 import type { Candle } from '../lib/types/market';
 import { ACTIVE_ORDER_STATUSES, type Trade } from '../lib/types/order';
@@ -70,6 +75,41 @@ const INDICATORS: { key: string; label: string; color: string }[] = [
     { key: 'vwap', label: 'VWAP', color: '#f5f7fa' },
 ];
 
+interface ChartBracketSettings {
+    enabled: boolean;
+    stkStopPct: number; // % below entry (stocks)
+    stkTakePct: number;
+    futStopTicks: number; // points away from entry (futures)
+    futTakeTicks: number;
+}
+
+const BRACKET_SETTINGS_KEY = 'sj-pro-chart-bracket';
+
+function loadBracketSettings(): ChartBracketSettings {
+    try {
+        const raw = localStorage.getItem(BRACKET_SETTINGS_KEY);
+        if (raw) {
+            const v = JSON.parse(raw);
+            return {
+                enabled: Boolean(v.enabled),
+                stkStopPct: Number(v.stkStopPct) || 1,
+                stkTakePct: Number(v.stkTakePct) || 2,
+                futStopTicks: Number(v.futStopTicks) || 20,
+                futTakeTicks: Number(v.futTakeTicks) || 40,
+            };
+        }
+    } catch {
+        // defaults
+    }
+    return {
+        enabled: false,
+        stkStopPct: 1,
+        stkTakePct: 2,
+        futStopTicks: 20,
+        futTakeTicks: 40,
+    };
+}
+
 function loadIndicators(): Set<string> {
     try {
         const raw = localStorage.getItem('sj-pro-indicators');
@@ -83,10 +123,12 @@ function loadIndicators(): Set<string> {
 export function CandleChart({
     contract,
     trades = [],
+    positions = [],
     onOrdersChanged,
 }: {
     contract: ContractBase;
     trades?: Trade[];
+    positions?: Position[];
     onOrdersChanged?: () => void;
 }) {
     const hostRef = useRef<HTMLDivElement>(null);
@@ -115,6 +157,31 @@ export function CandleChart({
     const barsRef = useRef<Candle[]>([]);
     const indSeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
     const triggers = useTriggers().filter((t) => t.code === contract.code);
+    const triggersRef = useRef(triggers);
+    triggersRef.current = triggers;
+    const triggerLinesRef = useRef(new Map<string, IPriceLine>());
+    const [bracketCfg, setBracketCfg] = useState<ChartBracketSettings>(
+        loadBracketSettings,
+    );
+    const [bracketMenuOpen, setBracketMenuOpen] = useState(false);
+    const bracketCfgRef = useRef(bracketCfg);
+    bracketCfgRef.current = bracketCfg;
+    const saveBracketCfg = (patch: Partial<ChartBracketSettings>) => {
+        setBracketCfg((prev) => {
+            const next = { ...prev, ...patch };
+            localStorage.setItem(BRACKET_SETTINGS_KEY, JSON.stringify(next));
+            return next;
+        });
+    };
+    // open position on this symbol (alias-aware)
+    const position =
+        positions.find(
+            (p) =>
+                p.code === contract.code ||
+                (contract.target_code && p.code === contract.target_code),
+        ) ?? null;
+    const positionRef = useRef(position);
+    positionRef.current = position;
     const workingOrders = useMemo(
         () =>
             trades.filter(
@@ -211,12 +278,32 @@ export function CandleChart({
             setMode('observe'); // one-shot
             if (m === 'buy' || m === 'sell') {
                 const action = m === 'buy' ? 'Buy' : 'Sell';
-                placeQuickOrder(c, action, price, qty)
+                // auto-bracket: offsets ride along and the server arms the
+                // OCO pair off the ACTUAL fill price
+                const cfg = bracketCfgRef.current;
+                const isFut =
+                    c.security_type === 'FUT' || c.security_type === 'OPT';
+                const bracket = cfg.enabled
+                    ? isFut
+                        ? {
+                              stop_offset: cfg.futStopTicks,
+                              take_offset: cfg.futTakeTicks,
+                              expiry: 'day' as const,
+                          }
+                        : {
+                              stop_offset:
+                                  Math.round(price * cfg.stkStopPct) / 100,
+                              take_offset:
+                                  Math.round(price * cfg.stkTakePct) / 100,
+                              expiry: 'day' as const,
+                          }
+                    : undefined;
+                placeQuickOrder(c, action, price, qty, { bracket })
                     .then((trade) =>
                         notify({
                             kind: 'ok',
                             title: `📈 圖表${action === 'Buy' ? '買進' : '賣出'}已送出`,
-                            body: `${c.code} ${qty} @ ${fmtPrice(price)} (${trade.status.status})`,
+                            body: `${c.code} ${qty} @ ${fmtPrice(price)} (${trade.status.status})${bracket ? '＋自動括號' : ''}`,
                         }),
                     )
                     .catch((e) =>
@@ -555,17 +642,19 @@ export function CandleChart({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orderKey, themeKey, contract.code]);
 
-    // drag an order line to modify its price
+    // drag a line (working order OR stop/take/alert trigger) to reprice it
     useEffect(() => {
         const host = hostRef.current;
         if (!host) return;
-        let dragging: { trade: Trade; line: IPriceLine; price: number } | null =
-            null;
+        type Hit =
+            | { kind: 'order'; trade: Trade; line: IPriceLine }
+            | { kind: 'trigger'; id: string; code: string; line: IPriceLine };
+        let dragging: (Hit & { price: number; orig: number }) | null = null;
 
         const yOf = (e: MouseEvent) =>
             e.clientY - host.getBoundingClientRect().top;
 
-        const findNear = (y: number) => {
+        const findNear = (y: number): Hit | null => {
             const series = candleSeriesRef.current;
             if (!series) return null;
             for (const t of workingOrdersRef.current) {
@@ -573,7 +662,15 @@ export function CandleChart({
                 if (!line) continue;
                 const coord = series.priceToCoordinate(line.options().price);
                 if (coord !== null && Math.abs(coord - y) <= 6) {
-                    return { trade: t, line };
+                    return { kind: 'order', trade: t, line };
+                }
+            }
+            for (const t of triggersRef.current) {
+                const line = triggerLinesRef.current.get(t.id);
+                if (!line) continue;
+                const coord = series.priceToCoordinate(line.options().price);
+                if (coord !== null && Math.abs(coord - y) <= 6) {
+                    return { kind: 'trigger', id: t.id, code: t.code, line };
                 }
             }
             return null;
@@ -595,9 +692,9 @@ export function CandleChart({
                 handleScale: false,
             });
             dragging = {
-                trade: hit.trade,
-                line: hit.line,
+                ...hit,
                 price: hit.line.options().price,
+                orig: hit.line.options().price,
             };
 
             const move = (ev: MouseEvent) => {
@@ -618,10 +715,20 @@ export function CandleChart({
                 });
                 const d = dragging;
                 dragging = null;
-                if (!d) return;
+                if (!d || d.price === d.orig) return;
+                if (d.kind === 'trigger') {
+                    // optimistic server PATCH — store reverts on failure
+                    void updateTriggerPrice(d.id, d.price).then(() =>
+                        notify({
+                            kind: 'ok',
+                            title: '✏️ 觸價已調整',
+                            body: `${d.code} ${fmtPrice(d.orig)} → ${fmtPrice(d.price)}`,
+                        }),
+                    );
+                    return;
+                }
                 const orig =
                     d.trade.status.modified_price || d.trade.order.price;
-                if (d.price === orig) return;
                 updateOrderPrice(d.trade.order.id, d.price)
                     .then(() => {
                         notify({
@@ -655,33 +762,96 @@ export function CandleChart({
         };
     }, []);
 
-    // draw trigger price lines on the candle series
+    // draw trigger price lines on the candle series (draggable via the
+    // unified drag handler above; suspended ones render grey)
     useEffect(() => {
         const series = candleSeriesRef.current;
         if (!series) return;
-        const lines = triggers.map((t) =>
-            series.createPriceLine({
-                price: t.price,
-                color:
-                    t.kind === 'stop'
-                        ? '#e0a43c'
-                        : t.kind === 'alert'
-                          ? '#8b94a7'
-                          : colors.crosshair,
-                lineWidth: 1,
-                lineStyle: 2, // dashed
-                axisLabelVisible: true,
-                title:
-                    t.kind === 'alert'
-                        ? '警示'
-                        : `${t.kind === 'stop' ? '停損' : '停利'}${t.action === 'Buy' ? '買' : '賣'}${t.quantity}`,
-            }),
-        );
+        const lines = new Map<string, IPriceLine>();
+        for (const t of triggers) {
+            const suspended = t.state === 'suspended';
+            lines.set(
+                t.id,
+                series.createPriceLine({
+                    price: t.price,
+                    color: suspended
+                        ? '#5a6372'
+                        : t.kind === 'stop'
+                          ? '#e0a43c'
+                          : t.kind === 'alert'
+                            ? '#8b94a7'
+                            : colors.crosshair,
+                    lineWidth: 1,
+                    lineStyle: 2, // dashed
+                    axisLabelVisible: true,
+                    title: `${suspended ? '⏸' : ''}${
+                        t.kind === 'alert'
+                            ? '警示'
+                            : `${t.kind === 'stop' ? '停損' : '停利'}${t.action === 'Buy' ? '買' : '賣'}${t.quantity}`
+                    } ⠿`,
+                }),
+            );
+        }
+        triggerLinesRef.current = lines;
         return () => {
-            for (const line of lines) series.removePriceLine(line);
+            for (const line of lines.values()) series.removePriceLine(line);
+            triggerLinesRef.current = new Map();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [JSON.stringify(triggers), themeKey, contract.code]);
+
+    // position average-price line（持倉均價）
+    useEffect(() => {
+        const series = candleSeriesRef.current;
+        if (!series || !position) return;
+        const line = series.createPriceLine({
+            price: position.price,
+            color: position.direction === 'Buy' ? colors.up : colors.down,
+            lineWidth: 2,
+            lineStyle: 3, // large dashed
+            axisLabelVisible: true,
+            title: `持倉${position.direction === 'Buy' ? '多' : '空'}${position.quantity}`,
+        });
+        return () => {
+            series.removePriceLine(line);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        position?.price,
+        position?.quantity,
+        position?.direction,
+        themeKey,
+        contract.code,
+    ]);
+
+    // one-click breakeven: move (or create) the stop to the entry price
+    const breakeven = async () => {
+        const pos = positionRef.current;
+        if (!pos) return;
+        const c = contractRef.current;
+        const be = roundToTick(c, pos.price);
+        const stops = triggersRef.current.filter(
+            (t) => t.kind === 'stop' && t.state === 'active',
+        );
+        if (stops.length > 0) {
+            for (const t of stops) await updateTriggerPrice(t.id, be);
+            notify({
+                kind: 'ok',
+                title: '🛡 保本完成',
+                body: `${c.code} 停損已移至進場均價 ${fmtPrice(be)}`,
+            });
+            return;
+        }
+        const lots = Math.max(1, Math.floor(pos.quantity + 1e-9));
+        await addTrigger({
+            contract: c,
+            condition: pos.direction === 'Buy' ? 'below' : 'above',
+            price: be,
+            action: pos.direction === 'Buy' ? 'Sell' : 'Buy',
+            quantity: lots,
+            kind: 'stop',
+        });
+    };
 
     return (
         <div className={styles.wrap}>
@@ -723,6 +893,104 @@ export function CandleChart({
                         if (Number.isInteger(v) && v >= 1) setTradeQty(v);
                     }}
                 />
+                <div style={{ position: 'relative' }}>
+                    <button
+                        className={
+                            styles.modeBtn[bracketCfg.enabled ? 'armed' : 'normal']
+                        }
+                        title='點價進場時自動帶停損/停利括號（以實際成交價為基準）— 右鍵或再點開啟設定'
+                        onClick={() => {
+                            if (bracketCfg.enabled) setBracketMenuOpen((o) => !o);
+                            else saveBracketCfg({ enabled: true });
+                        }}
+                        onContextMenu={(e) => {
+                            e.preventDefault();
+                            setBracketMenuOpen((o) => !o);
+                        }}
+                    >
+                        括{bracketCfg.enabled ? '✓' : ''}
+                    </button>
+                    {bracketMenuOpen && (
+                        <>
+                            <div
+                                className={styles.indBackdrop}
+                                onClick={() => setBracketMenuOpen(false)}
+                            />
+                            <div className={styles.indMenu}>
+                                <button
+                                    className={styles.indItem}
+                                    onClick={() =>
+                                        saveBracketCfg({
+                                            enabled: !bracketCfg.enabled,
+                                        })
+                                    }
+                                >
+                                    {bracketCfg.enabled
+                                        ? '✓ 自動括號啟用中'
+                                        : '啟用自動括號'}
+                                </button>
+                                <div className={styles.indItem}>
+                                    股票 損
+                                    <input
+                                        className={styles.qtyInput}
+                                        value={bracketCfg.stkStopPct}
+                                        inputMode='decimal'
+                                        onChange={(e) => {
+                                            const v = Number(e.target.value);
+                                            if (v > 0)
+                                                saveBracketCfg({
+                                                    stkStopPct: v,
+                                                });
+                                        }}
+                                    />
+                                    % 利
+                                    <input
+                                        className={styles.qtyInput}
+                                        value={bracketCfg.stkTakePct}
+                                        inputMode='decimal'
+                                        onChange={(e) => {
+                                            const v = Number(e.target.value);
+                                            if (v > 0)
+                                                saveBracketCfg({
+                                                    stkTakePct: v,
+                                                });
+                                        }}
+                                    />
+                                    %
+                                </div>
+                                <div className={styles.indItem}>
+                                    期貨 損
+                                    <input
+                                        className={styles.qtyInput}
+                                        value={bracketCfg.futStopTicks}
+                                        inputMode='numeric'
+                                        onChange={(e) => {
+                                            const v = Number(e.target.value);
+                                            if (v > 0)
+                                                saveBracketCfg({
+                                                    futStopTicks: v,
+                                                });
+                                        }}
+                                    />
+                                    點 利
+                                    <input
+                                        className={styles.qtyInput}
+                                        value={bracketCfg.futTakeTicks}
+                                        inputMode='numeric'
+                                        onChange={(e) => {
+                                            const v = Number(e.target.value);
+                                            if (v > 0)
+                                                saveBracketCfg({
+                                                    futTakeTicks: v,
+                                                });
+                                        }}
+                                    />
+                                    點
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
                 <div style={{ position: 'relative' }}>
                     <button
                         className={
@@ -777,8 +1045,63 @@ export function CandleChart({
                         {mode === 'alert' && '點擊價位設定到價警示（只通知不下單）'}
                     </div>
                 )}
-                {(workingOrders.length > 0 || triggers.length > 0) && (
+                {(workingOrders.length > 0 ||
+                    triggers.length > 0 ||
+                    position) && (
                     <div className={styles.triggerList}>
+                        {position && (
+                            <div className={styles.triggerRow}>
+                                <span
+                                    className={
+                                        panel.dirText[
+                                            position.direction === 'Buy'
+                                                ? 'up'
+                                                : 'down'
+                                        ]
+                                    }
+                                >
+                                    持倉{position.direction === 'Buy' ? '多' : '空'}
+                                    {position.quantity} @{fmtPrice(position.price)}{' '}
+                                    {(() => {
+                                        const last = Number(
+                                            quote?.tick?.close ??
+                                                position.last_price,
+                                        );
+                                        const dir =
+                                            position.direction === 'Buy' ? 1 : -1;
+                                        const pnl =
+                                            (last - position.price) *
+                                            position.quantity *
+                                            contractMultiplier(contract) *
+                                            dir;
+                                        return `${pnl >= 0 ? '+' : ''}${Math.round(pnl).toLocaleString()}`;
+                                    })()}
+                                </span>
+                                <span>
+                                    <button
+                                        className={styles.orderCancel}
+                                        title='保本：停損移至進場均價'
+                                        onClick={() => void breakeven()}
+                                    >
+                                        BE
+                                    </button>{' '}
+                                    <button
+                                        className={styles.orderCancel}
+                                        title='市價平倉'
+                                        onClick={() =>
+                                            void closeOrReverse(
+                                                position,
+                                                'close',
+                                            ).then(() =>
+                                                onOrdersChangedRef.current?.(),
+                                            ).catch(() => undefined)
+                                        }
+                                    >
+                                        平倉
+                                    </button>
+                                </span>
+                            </div>
+                        )}
                         {workingOrders.map((t) => {
                             const price =
                                 t.status.modified_price || t.order.price;
@@ -833,7 +1156,14 @@ export function CandleChart({
                         })}
                         {triggers.map((t) => (
                             <div key={t.id} className={styles.triggerRow}>
-                                <span>
+                                <span
+                                    style={
+                                        t.state === 'suspended'
+                                            ? { opacity: 0.55 }
+                                            : undefined
+                                    }
+                                >
+                                    {t.state === 'suspended' && '⏸ '}
                                     {t.kind === 'stop'
                                         ? '⛔'
                                         : t.kind === 'take'
@@ -844,12 +1174,25 @@ export function CandleChart({
                                     {t.kind !== 'alert' &&
                                         ` ${t.action === 'Buy' ? '買' : '賣'}${t.quantity}`}
                                 </span>
-                                <button
-                                    className={styles.triggerRemove}
-                                    onClick={() => void removeTrigger(t.id)}
-                                >
-                                    ✕
-                                </button>
+                                <span>
+                                    {t.state === 'suspended' && (
+                                        <button
+                                            className={styles.orderCancel}
+                                            title='重新啟用（若價格已穿越會立即觸發）'
+                                            onClick={() =>
+                                                void rearmTrigger(t.id)
+                                            }
+                                        >
+                                            ▶
+                                        </button>
+                                    )}{' '}
+                                    <button
+                                        className={styles.triggerRemove}
+                                        onClick={() => void removeTrigger(t.id)}
+                                    >
+                                        ✕
+                                    </button>
+                                </span>
                             </div>
                         ))}
                     </div>

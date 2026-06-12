@@ -7,6 +7,7 @@ import {
     fetchTrades,
     placeFuturesOrder,
     placeStockOrder,
+    type BracketParam,
 } from './backend';
 import type { ContractBase } from './types/contract';
 import {
@@ -50,6 +51,7 @@ export async function placeQuickOrder(
     opts?: {
         bypassRisk?: boolean; // protective exits skip risk gating
         orderLot?: StockOrderLot; // e.g. IntradayOdd for odd-lot closes
+        bracket?: BracketParam; // server arms OCO stop/take on fill
     },
 ): Promise<Trade> {
     if (!opts?.bypassRisk) {
@@ -62,7 +64,15 @@ export async function placeQuickOrder(
         if (blocked) throw new Error(blocked);
     }
     const market = price === null;
-    return sendOrder(contract, action, price, quantity, market, opts?.orderLot);
+    return sendOrder(
+        contract,
+        action,
+        price,
+        quantity,
+        market,
+        opts?.orderLot,
+        opts?.bracket,
+    );
 }
 
 async function sendOrder(
@@ -72,28 +82,37 @@ async function sendOrder(
     quantity: number,
     market: boolean,
     orderLot: StockOrderLot = 'Common',
+    bracket?: BracketParam,
 ): Promise<Trade> {
     if (isFuturesContract(contract) && !getCapabilities().futures_trading) {
         throw new Error('目前券商不支援期貨/選擇權下單（期權僅供行情顯示）');
     }
     const trade = isFuturesContract(contract)
-        ? await placeFuturesOrder(contract, {
-              action,
-              price: price ?? 0,
-              quantity,
-              price_type: market ? 'MKT' : 'LMT',
-              order_type: market ? 'IOC' : 'ROD',
-              octype: 'Auto',
-          })
-        : await placeStockOrder(contract, {
-              action,
-              price: price ?? 0,
-              quantity,
-              price_type: market ? 'MKT' : 'LMT',
-              // 盤中零股僅收 ROD 限價
-              order_type: market && orderLot === 'Common' ? 'IOC' : 'ROD',
-              order_lot: orderLot,
-          });
+        ? await placeFuturesOrder(
+              contract,
+              {
+                  action,
+                  price: price ?? 0,
+                  quantity,
+                  price_type: market ? 'MKT' : 'LMT',
+                  order_type: market ? 'IOC' : 'ROD',
+                  octype: 'Auto',
+              },
+              bracket,
+          )
+        : await placeStockOrder(
+              contract,
+              {
+                  action,
+                  price: price ?? 0,
+                  quantity,
+                  price_type: market ? 'MKT' : 'LMT',
+                  // 盤中零股僅收 ROD 限價
+                  order_type: market && orderLot === 'Common' ? 'IOC' : 'ROD',
+                  order_lot: orderLot,
+              },
+              bracket,
+          );
     return trade;
 }
 

@@ -133,6 +133,7 @@ function BlockBody({
                     <CandleChart
                         contract={contract}
                         trades={dockProps.trades}
+                        positions={dockProps.positions}
                         onOrdersChanged={dockProps.onTradesChanged}
                     />
                 </>
@@ -265,6 +266,19 @@ function PopoutView({
         }, []),
         8000,
     );
+    const positionsPoll = usePoll<Position[]>(
+        useCallback(async () => {
+            const [st, fu] = await Promise.allSettled([
+                fetchPositions('S'),
+                fetchPositions('F'),
+            ]);
+            return [
+                ...(st.status === 'fulfilled' ? st.value : []),
+                ...(fu.status === 'fulfilled' ? fu.value : []),
+            ];
+        }, []),
+        10000,
+    );
     const meta = BLOCK_META[type];
 
     let body: React.ReactNode = <BlockPlaceholder />;
@@ -279,6 +293,7 @@ function PopoutView({
                         <CandleChart
                             contract={contract}
                             trades={tradesPoll.data ?? []}
+                            positions={positionsPoll.data ?? []}
                             onOrdersChanged={tradesPoll.refresh}
                         />
                     </>
