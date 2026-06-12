@@ -446,6 +446,32 @@ function BrokerMenu() {
                             ),
                         )}
                     </div>
+                    {/* 每家券商：即使已有存檔憑證，也可改用其他帳號登入 */}
+                    {(['fubon', 'nova', 'esun'] as const).map((p) => {
+                        const avail = config?.creds?.[p];
+                        if (!avail?.saved && !avail?.env) return null;
+                        if (pending === p) return null;
+                        return (
+                            <button
+                                key={`relogin-${p}`}
+                                className={styles.menuItem}
+                                onClick={() => {
+                                    setPending(p);
+                                    setForm({
+                                        idNo: '',
+                                        password: '',
+                                        apiKey: '',
+                                        apiSecret: '',
+                                        certPath: '',
+                                        certPass: '',
+                                    });
+                                    setError('');
+                                }}
+                            >
+                                🔑 用其他{BROKER_LABEL[p]}帳號登入
+                            </button>
+                        );
+                    })}
                     {pending && (
                         <>
                             <span className={styles.settingLabel}>
