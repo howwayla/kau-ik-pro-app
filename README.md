@@ -4,9 +4,13 @@ A professional, fully-customizable trading terminal for Taiwan markets
 (TWSE / TPEX / TAIFEX). Forked from
 [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app) and rewired to:
 
-- **交易** — 台新 [Nova API](https://ml-fugle-api.tssco.com.tw/FugleSDK/docs/trading/introduction/)（`taishin-sdk`）
-  或富邦[新一代 API](https://www.fbs.com.tw/TradeAPI/docs/trading/introduction)（`fubon-neo`）
-- **行情** — [富果行情 API](https://developer.fugle.tw/docs/data/intro)（REST + WebSocket）
+- **多券商交易** — 台新 [Nova API](https://ml-fugle-api.tssco.com.tw/FugleSDK/docs/trading/introduction/)（`taishin-sdk`）、
+  富邦[新一代 API](https://www.fbs.com.tw/TradeAPI/docs/trading/introduction)（`fubon-neo`）、
+  玉山富果（`@esun/trade`）— UI 熱切換，SDK 已隨 repo 提供（clone 即用）
+- **行情** — [富果行情 API](https://developer.fugle.tw/docs/data/intro)（REST + WebSocket），
+  或隨券商自帶行情自動切換
+- **Topstep 式圖表部位管理** — 圖上拖曳停損/停利、一鍵保本、
+  自動括號單，三層保護（券商端條件單／本機觸價引擎／到期防呆）
 
 React 19 + TypeScript + Vite 前端維持不變，原本的 shioaji sidecar 改為
 本 repo 內建的 **Node.js local server**（`server/`），對前端提供相同的
@@ -14,17 +18,18 @@ REST + SSE 介面（`127.0.0.1:8080`），對外橋接券商 SDK 與富果行情
 
 ```
 React 前端 ── HTTP REST + SSE ──► server/（Fastify）
-                                    ├─ TRADE_PROVIDER:  mock │ fubon │ nova
-                                    └─ MARKET_PROVIDER: mock │ fugle
+                                    ├─ 券商:  mock │ 富邦 │ 台新 │ 玉山（UI 熱切換）
+                                    ├─ 行情:  mock │ 富果 │ 券商自帶
+                                    └─ 觸價引擎（停損/停利/OCO — 關閉分頁仍有效）
 ```
 
 預設 **mock 模式**：不需要任何憑證即可完整體驗（確定性模擬行情 +
-紙上交易撮合），拿到 API key / 憑證後切換環境變數即接真實來源。
+紙上交易撮合）；拿到 API key / 憑證後在 UI 表頭選單即可切換真實來源。
 
 以專業交易終端為目標：即時行情、K 線、五檔、閃電下單、圖表點價下單、
 停損停利觸價單、可拖拉的自訂版面。
 
-![Nova Pro — 富果即時行情（試撮時段，注意試/處標記）](docs/screenshot-dark.png)
+![Nova Pro — 圖表部位管理：持倉均價線、可拖曳的停損/停利線、一鍵保本](docs/screenshot-dark.png)
 
 | Dark | Light |
 |------|-------|
@@ -107,6 +112,8 @@ SDK 自帶的行情**（富邦/台新行情 API，免富果 Key）；切回 mock
 期權下單能力由 server 在 `GET /api/v1/info` 回傳的
 `capabilities.futures_trading` 決定，前端據此顯示/隱藏期權下單介面 —
 期權**行情**（選擇權 T 字報價、台指期基差）無論哪家券商都保留。
+`capabilities.condition_orders`（目前僅富邦）則決定停損停利保護可否
+升級為**券商端條件單**（斷網斷電皆有效；失敗自動退回本機觸價引擎）。
 
 ## Getting Started 開始使用
 
@@ -127,28 +134,29 @@ pnpm dev:all     # 同時啟動 vite 前端 + server（mock 行情與交易）
 
 也可以分開跑：`pnpm dev:server`（後端）+ `pnpm dev`（前端）。
 
-### 3. 接真實券商 / 行情（之後）
+### 3. 接真實券商 / 行情
 
-```sh
-cp .env.example .env   # 填入金鑰；.env 已被 .gitignore 排除，請勿 commit
-```
+券商 SDK（taishin-sdk / fubon-neo / @esun/trade）**已隨 repo 提供**，
+`pnpm install` 就裝好了 — 不需要另外下載任何東西。
 
-- **富果行情**：到 [developer.fugle.tw](https://developer.fugle.tw/) 申請
-  API key，設 `MARKET_PROVIDER=fugle`、`FUGLE_API_KEY=...`
-  （注意各方案的 WebSocket 訂閱數與 REST rate limit）
-- **富邦交易**：開戶＋申請憑證後，從官網下載 `fubon-neo-<version>.tgz`
-  放入 `server/vendor/`，執行
-  `pnpm --filter nova-pro-server add file:vendor/fubon-neo-<version>.tgz`，
-  設 `TRADE_PROVIDER=fubon` 與 `BROKER_*` 四個變數
-- **台新 Nova 交易**：同上模式，SDK 為 `taishin-sdk-<version>.tgz`，
-  設 `TRADE_PROVIDER=nova`。正式環境 API URL 已內建
-  （`https://fugletrade.tssco.com.tw`），測試環境用 `BROKER_API_URL` 覆蓋。
-  注意台新**一個帳號只允許一個 API session** — 若有其他程式（例如常駐的
-  fugle-trade MCP）佔用同帳號，帳務查詢會回空
+**最簡單的方式（推薦）— 全部在 UI 完成：**
 
-> ⚠️ 接上真實券商後，每一筆委託都是真實交易。兩家 provider 的欄位對應
-> 已依 SDK typings 與官方文件逐一查證，但尚未實單測試 — 請先以最小單位
-> （零股／一口小台）驗證下單、刪改單、回報全流程，再正常使用。
+1. **行情**：表頭「行情」選單 → 貼上[富果 API key](https://developer.fugle.tw/)
+   →「連接富果行情」（注意各方案的 WS 訂閱數與 REST rate limit；期權行情
+   需方案支援，403 自動降級）
+2. **券商**：表頭「券商」選單 → 選富邦/台新/玉山 → 填一次憑證資料
+   （存到 gitignored `server/data/config.json`，權限 600）→ 切換後
+   行情自動跟隨該券商自帶的行情 SDK
+
+**進階 — 環境變數**（適合無頭部署，見 `.env.example`）：
+`FUBON_ID_NO/FUBON_PASSWORD/FUBON_CERT_PATH/...`、`NOVA_*`、`ESUN_*`，
+搭配 `TRADE_PROVIDER=fubon|nova|esun`。
+
+> ⚠️ 接上真實券商後，每一筆委託都是真實交易。富邦/台新的下單、刪改單
+> 已經過實單驗證；玉山下單與**富邦券商端條件單（停損停利二合一）**尚未
+> 實單測試（搜尋 `TODO(verify)`）— 首次使用請以最小單位（零股／一口
+> 小台）驗證全流程。台新**一帳號限一個 API session**，若其他程式佔用
+> 同帳號，帳務查詢會回空。
 
 ## Server API（與前端的契約）
 
