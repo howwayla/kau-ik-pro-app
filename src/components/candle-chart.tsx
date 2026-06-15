@@ -267,6 +267,8 @@ export function CandleChart({
     const legendRef = useRef<HTMLDivElement>(null);
     const hoverTimeRef = useRef<number | null>(null);
     const barsByTimeRef = useRef(new Map<number, Candle>());
+    // 每根 K 棒的漲跌基準＝前一根收盤（首根退回開盤）— 算該根漲跌幅
+    const prevCloseByTimeRef = useRef(new Map<number, number>());
     const paintLegend = (bar: Candle | null) => {
         const el = legendRef.current;
         if (!el) return;
@@ -279,9 +281,18 @@ export function CandleChart({
         const lab = (s: string) => `<span style="color:${c.text}">${s}</span>`;
         const val = (n: number) =>
             `<span style="color:${dir}">${fmtPrice(n)}</span>`;
+        // 漲跌幅：收盤 vs 前一根收盤，正負各自上色（與 OHLC 的當根紅綠分開）
+        const base = prevCloseByTimeRef.current.get(bar.time) ?? bar.open;
+        const chg = base > 0 ? bar.close - base : 0;
+        const pct = base > 0 ? (chg / base) * 100 : 0;
+        const chgDir = chg > 0 ? c.up : chg < 0 ? c.down : c.text;
+        const sign = chg > 0 ? '+' : '';
         el.innerHTML =
             `${lab('開')}${val(bar.open)} ${lab('高')}${val(bar.high)} ` +
             `${lab('低')}${val(bar.low)} ${lab('收')}${val(bar.close)} ` +
+            `${lab('漲跌')}<span style="color:${chgDir}">${sign}${fmtPrice(
+                chg,
+            )} (${sign}${pct.toFixed(2)}%)</span> ` +
             `${lab('量')}<span style="color:${dir}">${Math.round(
                 bar.volume,
             ).toLocaleString('en-US')}</span>`;
@@ -618,6 +629,12 @@ export function CandleChart({
                 lastBarRef.current = bars[bars.length - 1] ?? null;
                 barsRef.current = bars;
                 barsByTimeRef.current = new Map(bars.map((b) => [b.time, b]));
+                prevCloseByTimeRef.current = new Map(
+                    bars.map((b, i) => [
+                        b.time,
+                        i > 0 ? bars[i - 1]!.close : b.open,
+                    ]),
+                );
                 hoverTimeRef.current = null;
                 paintLegend(lastBarRef.current);
                 loadingRef.current = false;
@@ -673,6 +690,8 @@ export function CandleChart({
         const dayHigh = Number(tick.high) || price;
         const dayLow = Number(tick.low) || price;
         if (!bar || bucket > bar.time) {
+            // 新棒誕生：記下它的漲跌基準＝前一根收盤（給 legend 算漲跌幅）
+            if (bar) prevCloseByTimeRef.current.set(bucket, bar.close);
             bar = dailyPlus
                 ? {
                       time: bucket,

@@ -157,8 +157,10 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     private contractCache = new Map<string, ContractInfo>();
     private optChain: OptContract[] | null = null;
     private optChainAt = 0;
+    private optChainAh = false; // 上次抓 optChain 是否夜盤（快取分盤別）
     private futTickers: any[] | null = null;
     private futTickersAt = 0;
+    private futTickersAh = false; // 上次抓 futTickers 是否夜盤（快取分盤別）
     private aliasMap = new Map<string, string>(); // TXFR1 → TXFF6
 
     private subs = new Map<string, Set<StreamQuoteType>>(); // by fugle symbol
@@ -460,13 +462,24 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     }
 
     private async futuresTickers(): Promise<any[]> {
-        if (this.futTickers && Date.now() - this.futTickersAt < TICKERS_TTL_MS) {
+        // 夜盤時段「日盤 tickers」回空 → 連續月 alias(TXFR1) 解析不出來、
+        // 整條期貨資料鏈斷掉。夜盤必須帶 session:'AFTERHOURS'。快取分盤別。
+        const ah = isAfterHoursNow();
+        if (
+            this.futTickers &&
+            this.futTickersAh === ah &&
+            Date.now() - this.futTickersAt < TICKERS_TTL_MS
+        ) {
             return this.futTickers;
         }
-        const res = await this.rest.futopt.intraday.tickers({ type: 'FUTURE' });
+        const res = await this.rest.futopt.intraday.tickers({
+            type: 'FUTURE',
+            ...(ah ? { session: 'AFTERHOURS' } : {}),
+        });
         this.warnIfForbidden(res);
         this.futTickers = Array.isArray(res?.data) ? res.data : [];
         this.futTickersAt = Date.now();
+        this.futTickersAh = ah;
         return this.futTickers!;
     }
 
@@ -588,10 +601,19 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     }
 
     async listOptionContracts(): Promise<OptContract[]> {
-        if (this.optChain && Date.now() - this.optChainAt < TICKERS_TTL_MS) {
+        // 夜盤同 futuresTickers：日盤 OPTION tickers 回空 → 夜盤帶 AFTERHOURS
+        const ah = isAfterHoursNow();
+        if (
+            this.optChain &&
+            this.optChainAh === ah &&
+            Date.now() - this.optChainAt < TICKERS_TTL_MS
+        ) {
             return this.optChain;
         }
-        const res = await this.rest.futopt.intraday.tickers({ type: 'OPTION' });
+        const res = await this.rest.futopt.intraday.tickers({
+            type: 'OPTION',
+            ...(ah ? { session: 'AFTERHOURS' } : {}),
+        });
         this.warnIfForbidden(res);
         const rows: any[] = Array.isArray(res?.data) ? res.data : [];
         const out: OptContract[] = [];
@@ -615,6 +637,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         }
         this.optChain = out;
         this.optChainAt = Date.now();
+        this.optChainAh = ah;
         return out;
     }
 
@@ -836,12 +859,20 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             ask_volume: [],
             tick_type: [],
         };
-        const today = new Date().toISOString().slice(0, 10);
-        if (date !== today) return out; // fugle serves intraday trades only
         const symbol = isContinuousAlias(key.code)
             ? ((await this.resolveAlias(key.code)) ?? key.code)
             : toFugleSymbol(key.code);
         const isFutopt = this.wsKindFor(symbol) === 'futopt';
+        // fugle 只服務「當日 intraday」逐筆。股票用台北日期比對（不可用
+        // UTC，否則台北半夜會比成前一天 → 整片回空）。期貨/選擇權夜盤跨
+        // 午夜、掛在次交易日，intraday 端點本來就只回當下這盤 → 不 gate 日期，
+        // session 由 isAfterHoursNow 決定日盤/夜盤。
+        if (!isFutopt) {
+            const today = new Date().toLocaleDateString('sv-SE', {
+                timeZone: 'Asia/Taipei',
+            });
+            if (date !== today) return out;
+        }
         try {
             const res = isFutopt
                 ? await this.rest.futopt.intraday.trades({
