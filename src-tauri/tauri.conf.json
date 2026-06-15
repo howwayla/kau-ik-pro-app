@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Nova Pro",
   "version": "0.1.0",
-  "identifier": "io.github.howwayla.nova-pro",
+  "identifier": "io.github.howwayla.novapro",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
