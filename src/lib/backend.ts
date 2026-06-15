@@ -174,11 +174,19 @@ export function fetchSnapshots(contracts: ContractBase[]) {
     });
 }
 
-export function fetchKbars(contract: ContractBase, start: string, end: string) {
+export type MarketSession = 'day' | 'afterhours' | 'all';
+
+export function fetchKbars(
+    contract: ContractBase,
+    start: string,
+    end: string,
+    session?: MarketSession,
+) {
     return apiPost<KBars>('/api/v1/data/kbars', {
         contract: contractKey(contract),
         start,
         end,
+        ...(session ? { session } : {}),
     });
 }
 

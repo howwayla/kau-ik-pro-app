@@ -5,6 +5,7 @@ import type {
     ContractInfo,
     CreditEnquire,
     HistoryTicks,
+    MarketSession,
     KBars,
     OptContract,
     ScannerItem,
@@ -80,7 +81,12 @@ export class MockMarketDataProvider implements MarketDataProvider {
         return out;
     }
 
-    async kbars(key: ContractKey, start: string, end: string): Promise<KBars> {
+    async kbars(
+        key: ContractKey,
+        start: string,
+        end: string,
+        _session?: MarketSession, // mock 無夜盤資料，忽略
+    ): Promise<KBars> {
         return this.engine.kbars(key.code, start, end);
     }
 

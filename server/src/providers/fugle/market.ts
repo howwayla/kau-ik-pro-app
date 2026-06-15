@@ -19,6 +19,7 @@ import type {
     CreditEnquire,
     HistoryTicks,
     KBars,
+    MarketSession,
     OptContract,
     VolumeLevel,
     ScannerItem,
@@ -638,15 +639,20 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     // historical quota (daily data is static intraday)
     private kbarsCache = new Map<string, { at: number; kbars: KBars }>();
 
-    async kbars(key: ContractKey, start: string, end: string): Promise<KBars> {
-        const cacheKey = `${key.code}:${start}:${end}`;
+    async kbars(
+        key: ContractKey,
+        start: string,
+        end: string,
+        session: MarketSession = 'all',
+    ): Promise<KBars> {
+        const cacheKey = `${key.code}:${start}:${end}:${session}`;
         const hit = this.kbarsCache.get(cacheKey);
         // 分鐘級（短區間）盤中會持續長新 K 棒 — 快取縮短到 1 分鐘
         const spanDays =
             (new Date(end).getTime() - new Date(start).getTime()) / 86_400_000;
         const ttl = spanDays <= 70 ? 60_000 : 10 * 60_000;
         if (hit && Date.now() - hit.at < ttl) return hit.kbars;
-        const out = await this.kbarsUncached(key, start, end);
+        const out = await this.kbarsUncached(key, start, end, session);
         if (out.datetime.length > 0) {
             if (this.kbarsCache.size > 50) this.kbarsCache.clear();
             this.kbarsCache.set(cacheKey, { at: Date.now(), kbars: out });
@@ -709,6 +715,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         key: ContractKey,
         start: string,
         end: string,
+        session: MarketSession = 'all',
     ): Promise<KBars> {
         const symbol = isContinuousAlias(key.code)
             ? ((await this.resolveAlias(key.code)) ?? key.code)
@@ -718,12 +725,32 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             (new Date(end).getTime() - new Date(start).getTime()) / 86_400_000;
 
         if (isFutopt) {
-            // fugle has no historical futopt candles — intraday (today) only
-            const res = await this.rest.futopt.intraday.candles({
-                symbol,
-                ...(isAfterHoursNow() ? { session: 'afterhours' } : {}),
-            });
-            return kbarsFromCandles(res?.data ?? [], false);
+            // fugle has no historical futopt candles — intraday (today) only.
+            // 日盤=無 session、夜盤=session:afterhours、全=兩段抓回來按時間接續。
+            const fetchSession = async (s?: 'afterhours'): Promise<any[]> => {
+                const res = await this.rest.futopt.intraday.candles({
+                    symbol,
+                    ...(s ? { session: s } : {}),
+                });
+                return res?.data ?? [];
+            };
+            let rows: any[];
+            if (session === 'day') {
+                rows = await fetchSession();
+            } else if (session === 'afterhours') {
+                rows = await fetchSession('afterhours');
+            } else {
+                const [day, night] = await Promise.all([
+                    fetchSession(),
+                    fetchSession('afterhours'),
+                ]);
+                // 同 cycle：日盤(08:45–13:45) → 夜盤(15:00–次日05:00)，
+                // 依 date(含時間) 排序接成連續序列
+                rows = [...day, ...night].sort((a, b) =>
+                    String(a.date).localeCompare(String(b.date)),
+                );
+            }
+            return kbarsFromCandles(rows, false);
         }
         // minute candles ignore from/to and return ~30 days; filter locally
         const timeframe =

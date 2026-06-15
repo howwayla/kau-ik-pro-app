@@ -4,7 +4,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.ts';
 import type { ContractKey } from '../providers/market-data.ts';
-import type { ScannerType, SecurityType } from '../types/dto.ts';
+import type {
+    MarketSession,
+    ScannerType,
+    SecurityType,
+} from '../types/dto.ts';
 
 interface ContractsQuery {
     security_type?: string;
@@ -49,9 +53,19 @@ export function registerDataRoutes(
     );
 
     app.post<{
-        Body: { contract: ContractKey; start: string; end: string };
+        Body: {
+            contract: ContractKey;
+            start: string;
+            end: string;
+            session?: MarketSession;
+        };
     }>('/api/v1/data/kbars', async (req) =>
-        ctx.market.kbars(req.body.contract, req.body.start, req.body.end),
+        ctx.market.kbars(
+            req.body.contract,
+            req.body.start,
+            req.body.end,
+            req.body.session,
+        ),
     );
 
     app.post<{ Body: { contract: ContractKey } }>(

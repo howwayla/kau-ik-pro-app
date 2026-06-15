@@ -15,7 +15,12 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuote } from '../hooks/use-stream';
 import { bollinger, ema, sma, vwap } from '../lib/indicators';
-import { cancelOrder, fetchKbars, updateOrderPrice } from '../lib/backend';
+import {
+    cancelOrder,
+    fetchKbars,
+    updateOrderPrice,
+    type MarketSession,
+} from '../lib/backend';
 import { setPickedPrice } from '../lib/price-sync';
 import { notify, placeQuickOrder } from '../lib/trade';
 import {
@@ -134,6 +139,22 @@ function loadChartStyle(): ChartStyle {
     return 'candle';
 }
 
+const SESSIONS: { key: MarketSession; label: string }[] = [
+    { key: 'day', label: '日' },
+    { key: 'afterhours', label: '夜' },
+    { key: 'all', label: '全' },
+];
+
+function loadSession(): MarketSession {
+    try {
+        const s = localStorage.getItem('sj-pro-session');
+        if (s === 'day' || s === 'afterhours' || s === 'all') return s;
+    } catch {
+        // default
+    }
+    return 'all';
+}
+
 export function CandleChart({
     contract,
     trades = [],
@@ -164,6 +185,10 @@ export function CandleChart({
     const lastDailyRef = useRef<{ time: number; volume: number } | null>(null);
     const [tfIdx, setTfIdx] = useState(1); // default 5m
     const [chartStyle, setChartStyle] = useState<ChartStyle>(loadChartStyle);
+    // 期貨/選擇權盤別：日 / 夜 / 全（個股無夜盤，固定日盤）
+    const isFutopt =
+        contract.security_type === 'FUT' || contract.security_type === 'OPT';
+    const [session, setSession] = useState<MarketSession>(loadSession);
     const [empty, setEmpty] = useState(false);
     const quote = useQuote(contract.code);
     const tf = TIMEFRAMES[tfIdx] ?? TIMEFRAMES[1];
@@ -540,7 +565,12 @@ export function CandleChart({
         lastBarRef.current = null;
         liveVolBaseRef.current = null;
         setEmpty(false);
-        fetchKbars(contract, dateStrOffset(tf.days), dateStrOffset(0))
+        fetchKbars(
+            contract,
+            dateStrOffset(tf.days),
+            dateStrOffset(0),
+            isFutopt ? session : undefined,
+        )
             .then((k) => {
                 if (cancelled || !candleSeriesRef.current) return;
                 const daily = kbarsToCandles(k);
@@ -609,7 +639,7 @@ export function CandleChart({
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [contract, tf, themeKey]);
+    }, [contract, tf, themeKey, session]);
 
     // live tick -> update current bar
     const tick = quote?.tick;
@@ -621,6 +651,14 @@ export function CandleChart({
         if (!tick || tick.code !== contract.code) return;
         if (tick.simtrade) return; // 試撮 never paints into candles
         if (loadingRef.current) return; // 載入中：series 還是舊資料，不可寫
+        // 期權盤別 guard：依 tick 自身時刻判日/夜，與檢視盤別不符就不畫
+        //（避免在「日」盤圖上長出夜盤未來棒，反之亦然）
+        if (isFutopt && session !== 'all') {
+            const [hh, mm] = tick.time.split(':');
+            const min = Number(hh) * 60 + Number(mm);
+            const tickNight = min >= 15 * 60 || min < 8 * 60 + 45;
+            if ((session === 'afterhours') !== tickNight) return;
+        }
         const series = candleSeriesRef.current;
         if (!series) return;
         const price = Number(tick.close);
@@ -704,7 +742,7 @@ export function CandleChart({
         ) {
             paintLegend(bar);
         }
-    }, [tick, contract.code, tf.minutes]);
+    }, [tick, contract.code, tf.minutes, session, isFutopt]);
 
     // overlay indicators
     useEffect(() => {
@@ -1066,6 +1104,41 @@ export function CandleChart({
                 >
                     線
                 </button>
+                {isFutopt && (
+                    <>
+                        <span className={styles.toolbarDivider} />
+                        {SESSIONS.map((s) => (
+                            <button
+                                key={s.key}
+                                className={
+                                    styles.tfBtn[
+                                        session === s.key ? 'active' : 'normal'
+                                    ]
+                                }
+                                title={
+                                    s.key === 'day'
+                                        ? '日盤 08:45–13:45'
+                                        : s.key === 'afterhours'
+                                          ? '夜盤(盤後) 15:00–次日05:00'
+                                          : '日盤＋夜盤連續顯示'
+                                }
+                                onClick={() => {
+                                    setSession(s.key);
+                                    try {
+                                        localStorage.setItem(
+                                            'sj-pro-session',
+                                            s.key,
+                                        );
+                                    } catch {
+                                        // ignore
+                                    }
+                                }}
+                            >
+                                {s.label}
+                            </button>
+                        ))}
+                    </>
+                )}
                 <span className={styles.toolbarDivider} />
                 {TRADE_MODES.map((m) => (
                     <button
