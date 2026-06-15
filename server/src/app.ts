@@ -14,6 +14,7 @@ import { registerPortfolioRoutes } from './routes/portfolio.ts';
 import { registerStreamRoutes } from './routes/stream.ts';
 import { registerTriggerRoutes } from './routes/triggers.ts';
 import { registerWatchlistRoutes } from './routes/watchlist.ts';
+import { wireMarketToHub } from './sse/wire-market.ts';
 
 export function buildApp(ctx: AppContext): FastifyInstance {
     const app = Fastify({ logger: { level: 'warn' } });
@@ -73,10 +74,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     }
 
     // provider events → SSE fan-out
-    ctx.market.onTick((channel, tick) => ctx.hub.broadcast(channel, tick));
-    ctx.market.onBidAsk((channel, bidask) =>
-        ctx.hub.broadcast(channel, bidask),
-    );
+    wireMarketToHub(ctx.market, ctx.hub);
     ctx.trading.onOrderEvent((ev) => ctx.hub.broadcast('order_event', ev));
 
     return app;
