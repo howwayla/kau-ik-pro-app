@@ -68,12 +68,22 @@ export interface DayState {
 }
 
 export function dayStateFromQuote(q: any): DayState {
-    // 參考價優先用 referencePrice（交易所公告今日參考價）— 除權息日
-    // 它 ≠ previousClose（昨收），漲跌幅/漲跌停都要以它為基準
-    const ref = num(q?.referencePrice ?? q?.previousClose);
+    const lastRaw = num(q?.closePrice ?? q?.lastPrice);
+    // 參考價：①交易所公告今日參考價 referencePrice 最優先（個股除權息日用）。
+    // ②期貨/選擇權「夜盤」quote 不帶 referencePrice，且 previousClose 欄位
+    //   不是夜盤基準（夜盤基準=當日日盤結算）→ 改用 API 權威 change 反推
+    //   reference = last − change（日盤同樣成立，且比 previousClose 精確，
+    //   對齊 API 自算的 change%）。③都沒有才退回 previousClose。
+    const change = q?.change;
+    const ref =
+        num(q?.referencePrice) > 0
+            ? num(q.referencePrice)
+            : lastRaw > 0 && change != null && Number.isFinite(Number(change))
+              ? lastRaw - num(change)
+              : num(q?.previousClose);
     // pre-open the session has no trades yet: closePrice/lastPrice are
     // null — show the reference price instead of 0
-    const last = num(q?.closePrice ?? q?.lastPrice) || ref;
+    const last = lastRaw || ref;
     return {
         open: num(q?.openPrice) || last,
         high: num(q?.highPrice) || last,
