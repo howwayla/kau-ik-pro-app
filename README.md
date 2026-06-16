@@ -6,7 +6,7 @@ A professional, fully-customizable trading terminal for Taiwan markets
 
 - **多券商交易** — 台新 [Nova API](https://ml-fugle-api.tssco.com.tw/FugleSDK/docs/trading/introduction/)（`taishin-sdk`）、
   富邦[新一代 API](https://www.fbs.com.tw/TradeAPI/docs/trading/introduction)（`fubon-neo`）、
-  玉山富果（`@esun/trade`）— UI 熱切換，SDK 已隨 repo 提供（clone 即用）
+  玉山證券（`@esun/trade`）— UI 熱切換，SDK 已隨 repo 提供（clone 即用）
 - **行情** — [富果行情 API](https://developer.fugle.tw/docs/data/intro)（REST + WebSocket），
   或隨券商自帶行情自動切換
 - **Topstep 式圖表部位管理** — 圖上拖曳停損/停利、一鍵保本、
