@@ -186,7 +186,7 @@ pnpm install
 
 pnpm dev:all         # ① 最快：瀏覽器看 → http://localhost:5173（不需 Rust/bun）
 pnpm desktop:dev     # ② 真正的桌面視窗（開發模式，sidecar 自動啟動）
-pnpm desktop:build   # ③ 產出可安裝的 .app/.dmg | .msi/.exe | .AppImage/.deb/.rpm
+pnpm desktop:build   # ③ 產出可安裝的 .app/.dmg | .msi/.exe | .deb/.rpm
 ```
 
 第 ① 條只需要 Node + pnpm（見上方 Getting Started）。第 ②③ 條要**多裝**
@@ -216,8 +216,12 @@ sudo apt update && sudo apt install -y libwebkit2gtk-4.1-dev \
 ### 建置與啟動
 
 `pnpm desktop:build` 完成後，安裝檔在 `src-tauri/target/release/bundle/`
-（macOS：`dmg/`＋`macos/`；Windows：`msi/`、`nsis/`；Linux：`appimage/`、
-`deb/`、`rpm/`）。啟動後頂部會顯示**「模擬環境」**徽章，不需任何憑證即可操作。
+（macOS：`dmg/`＋`macos/`；Windows：`msi/`、`nsis/`；Linux：`deb/`、`rpm/`）。
+啟動後頂部會顯示**「模擬環境」**徽章，不需任何憑證即可操作。
+
+> Linux 本機建置只產 `.deb` / `.rpm`（涵蓋 Debian/Ubuntu 與 Fedora/RHEL）；
+> 不產 AppImage —— 其打包工具（linuxdeploy）在新版發行版上不穩。需要 AppImage
+> 請走 CI release（`release.yml` 保留全格式）。
 
 - **macOS**：自己 build 的 `.app` 直接開即可；若因故被 Gatekeeper 攔，
   右鍵 →「打開」一次即可（不需關閉 Gatekeeper）。

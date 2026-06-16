@@ -125,15 +125,18 @@ if (sidecarOnly) {
 }
 
 const tauriCmd = dev ? 'dev' : 'build';
-// AppImage bundling shells out to linuxdeploy, itself a FUSE AppImage. Ubuntu
-// 24.04+ ships without libfuse2, so tell the AppImage tooling to extract-and-run
-// instead of mounting via FUSE — otherwise `tauri build` fails at the AppImage step.
-if (process.platform === 'linux') process.env.APPIMAGE_EXTRACT_AND_RUN = '1';
+const extraArgs = [];
+// On Linux, scope the bundle to deb + rpm. The AppImage bundler shells out to
+// linuxdeploy (itself a FUSE AppImage), which is unreliable on modern distros
+// (Ubuntu 24.04+ drops libfuse2) — it hangs and then fails. deb + rpm cover the
+// Linux desktop, build reliably, and rpm skips gracefully without rpmbuild.
+// (CI release.yml keeps bundle.targets "all" for its controlled environment.)
+if (!dev && process.platform === 'linux') extraArgs.push('--bundles', 'deb,rpm');
 console.log(
   `\n[2/2] ${dev ? 'starting Tauri dev window' : 'bundling the desktop app'} (\`tauri ${tauriCmd}\`)` +
     `${dev ? '' : ' — Rust release build, this takes several minutes; do not interrupt'}…\n`,
 );
-run('pnpm', ['exec', 'tauri', tauriCmd]);
+run('pnpm', ['exec', 'tauri', tauriCmd, ...extraArgs]);
 
 if (!dev) {
   console.log(
