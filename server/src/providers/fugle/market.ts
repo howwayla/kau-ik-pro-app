@@ -215,21 +215,13 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         const STALE_MS = 45_000;
         this.sessionWatch = setInterval(() => {
             if (this.disposed) return;
-            const reconnect = (kind: 'stock' | 'futopt') => {
-                const ws = kind === 'stock' ? this.stockWs : this.futoptWs;
-                try {
-                    ws?.disconnect?.(); // close handler → 3s 後 resubscribe
-                } catch {
-                    /* already closed */
-                }
-            };
             // ① futopt 盤別翻轉
             if (
                 this.futoptWs &&
                 this.futoptAfterHours !== null &&
                 isAfterHoursNow() !== this.futoptAfterHours
             ) {
-                reconnect('futopt');
+                void this.forceReconnect('futopt');
                 return; // 重連即會刷新時戳，這輪不再判殭屍
             }
             // ② 殭屍連線偵測
@@ -244,10 +236,36 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                             (now - this.lastWsMsgAt[kind]) / 1000,
                         )}s 無封包）— 重連`,
                     );
-                    reconnect(kind);
+                    // 先把時戳推到未來，避免重連完成前的下一輪又判殭屍重複觸發
+                    this.lastWsMsgAt[kind] = now;
+                    void this.forceReconnect(kind);
                 }
             }
         }, 20_000);
+    }
+
+    /**
+     * 強制重建某條 WS。**不能只呼叫 disconnect() 等 'close' 來重連** —
+     * 實測 esun WS 的 disconnect() 不會觸發 'close' 事件，靠 close handler
+     * 重連的鏈永遠不啟動 → stockWs 一直指著死連線、watchdog 無限重連迴圈、
+     * live feed 全死（2026-06-16 回歸）。改為主動 null ref + 移除舊 listener
+     *（防舊連線稍後的 close 把新連線歸零）+ 直接 resubscribe。
+     */
+    private async forceReconnect(kind: 'stock' | 'futopt'): Promise<void> {
+        const ws = kind === 'stock' ? this.stockWs : this.futoptWs;
+        if (kind === 'stock') this.stockWs = null;
+        else this.futoptWs = null;
+        try {
+            ws?.removeAllListeners?.();
+        } catch {
+            /* not an emitter */
+        }
+        try {
+            ws?.disconnect?.();
+        } catch {
+            /* already closed */
+        }
+        if (!this.disposed) await this.resubscribe(kind);
     }
 
     dispose(): void {
