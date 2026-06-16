@@ -1,0 +1,65 @@
+name: Desktop build check (manual)
+
+# On-demand check that the build-from-source command (`pnpm desktop:build`)
+# works end-to-end on real macOS / Windows / Linux runners, uploading the
+# installers as artifacts. Manual only (workflow_dispatch) — a full Tauri
+# release build per OS is slow, so it doesn't run on every push. Run it from the
+# Actions tab when touching the build script, the sidecar, or the toolchain.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Full Tauri v2 Linux deps — the exact list documented in README/AGENTS.md.
+      # Running it here also validates that list is sufficient on a fresh runner.
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm test
+
+      # The actual user command — preflight + sidecar compile + tauri build.
+      - name: Build desktop app from source
+        run: pnpm desktop:build
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-pro-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.app
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
+          if-no-files-found: warn
+          retention-days: 7
