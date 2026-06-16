@@ -5,7 +5,7 @@ export const isTauri =
     typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 // In Tauri the frontend is served from tauri://localhost — API calls must
-// target the local nova-pro server explicitly.
+// target the local kau-ik-pro server explicitly.
 export function getApiBase(): string {
     const env = import.meta.env.VITE_API_BASE as string | undefined;
     if (env) return env;

@@ -82,14 +82,14 @@ pub fn run() {
 
             // ---- tray / menu-bar icon ----
             let show =
-                MenuItem::with_id(app, "show", "顯示 Nova Pro", true, None::<&str>)?;
+                MenuItem::with_id(app, "show", "顯示 Kau-ik Pro", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "結束", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
             let mut tray = TrayIconBuilder::with_id("main-tray")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .tooltip("Nova Pro")
+                .tooltip("Kau-ik Pro")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => show_main(app),
                     "quit" => app.exit(0),

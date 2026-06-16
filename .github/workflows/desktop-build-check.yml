@@ -52,7 +52,7 @@ jobs:
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: nova-pro-${{ matrix.os }}
+          name: kau-ik-pro-${{ matrix.os }}
           path: |
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.app

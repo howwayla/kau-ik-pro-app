@@ -1,11 +1,11 @@
 {
-    "name": "nova-pro-app",
+    "name": "kau-ik-pro-app",
     "private": true,
     "version": "0.0.0",
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "dev:server": "pnpm --filter nova-pro-server dev",
+        "dev:server": "pnpm --filter kau-ik-pro-server dev",
         "dev:all": "concurrently -k \"pnpm dev\" \"pnpm dev:server\"",
         "build": "tsc -b && vite build",
         "preview": "vite preview",

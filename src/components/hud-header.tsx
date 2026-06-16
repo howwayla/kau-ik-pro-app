@@ -856,7 +856,7 @@ export function HudHeader({
     return (
         <header className={styles.header}>
             <div className={styles.logoBlock}>
-                <span className={styles.logoMain}>Nova Pro</span>
+                <span className={styles.logoMain}>Kau-ik Pro</span>
                 <span className={styles.logoSub}>
                     交易終端 {version && `v${version}`}
                 </span>

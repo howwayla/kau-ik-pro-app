@@ -24,7 +24,7 @@ export async function openPopout(type: string, code: string | null) {
     popoutCounter += 1;
     new WebviewWindow(`popout-${type}-${popoutCounter}`, {
         url: `index.html?${qs}`,
-        title: `Nova Pro — ${type}${code ? ` · ${code}` : ''}`,
+        title: `Kau-ik Pro — ${type}${code ? ` · ${code}` : ''}`,
         width: 900,
         height: 620,
         minWidth: 420,
