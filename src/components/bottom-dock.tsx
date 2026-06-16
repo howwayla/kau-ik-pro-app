@@ -225,6 +225,9 @@ function OrdersTable({
     onChanged: () => void;
 }) {
     const [cancelling, setCancelling] = useState<string | null>(null);
+    const [batch, setBatch] = useState(false); // 批次刪單模式
+    const [picked, setPicked] = useState<Set<string>>(new Set());
+    const [batchBusy, setBatchBusy] = useState(false);
     if (trades.length === 0) {
         return <div className={styles.emptyState}>NO ORDERS · 無委託</div>;
     }
@@ -239,11 +242,104 @@ function OrdersTable({
             setCancelling(null);
         }
     };
+    // 可刪的（仍在委託中的）單
+    const active = trades.filter((t) => ACTIVE_STATUSES.has(t.status.status));
+    const toggle = (id: string) =>
+        setPicked((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    // 批次刪除指定一組委託：逐筆送、容錯（盤後/個別失敗不影響其餘）
+    const cancelMany = async (ids: string[]) => {
+        if (ids.length === 0 || batchBusy) return;
+        setBatchBusy(true);
+        try {
+            const r = await Promise.allSettled(ids.map((id) => cancelOrder(id)));
+            const ok = r.filter((x) => x.status === 'fulfilled').length;
+            notify({
+                kind: ok === ids.length ? 'ok' : 'err',
+                title: '🗑 批次刪單',
+                body: `成功 ${ok} / ${ids.length} 筆${
+                    ok < ids.length ? '（部分失敗，可能非交易時段）' : ''
+                }`,
+            });
+            setPicked(new Set());
+            setBatch(false);
+            onChanged();
+        } finally {
+            setBatchBusy(false);
+        }
+    };
+    const allPicked = active.length > 0 && picked.size === active.length;
     return (
-        <table className={styles.table}>
-            <thead>
-                <tr>
-                    <th className={styles.th}>代碼</th>
+        <>
+            <div className={styles.orderBar}>
+                <span className={styles.orderBarInfo}>
+                    委託中 {active.length} 筆
+                </span>
+                {batch ? (
+                    <>
+                        <button
+                            className={styles.cancelBtn}
+                            disabled={batchBusy || picked.size === 0}
+                            onClick={() => void cancelMany([...picked])}
+                        >
+                            刪除選取 {picked.size > 0 ? `(${picked.size})` : ''}
+                        </button>
+                        <button
+                            className={styles.cancelBtn}
+                            disabled={batchBusy || active.length === 0}
+                            onClick={() =>
+                                void cancelMany(active.map((t) => t.order.id))
+                            }
+                        >
+                            全部刪單 ({active.length})
+                        </button>
+                        <button
+                            className={panel.btn}
+                            onClick={() => {
+                                setBatch(false);
+                                setPicked(new Set());
+                            }}
+                        >
+                            取消
+                        </button>
+                    </>
+                ) : (
+                    <button
+                        className={panel.btn}
+                        disabled={active.length === 0}
+                        onClick={() => setBatch(true)}
+                    >
+                        批次刪單
+                    </button>
+                )}
+            </div>
+            <table className={styles.table}>
+                <thead>
+                    <tr>
+                        {batch && (
+                            <th className={styles.th}>
+                                <input
+                                    type='checkbox'
+                                    checked={allPicked}
+                                    onChange={() =>
+                                        setPicked(
+                                            allPicked
+                                                ? new Set()
+                                                : new Set(
+                                                      active.map(
+                                                          (t) => t.order.id,
+                                                      ),
+                                                  ),
+                                        )
+                                    }
+                                />
+                            </th>
+                        )}
+                        <th className={styles.th}>代碼</th>
                     <th className={styles.th}>買賣</th>
                     <th className={styles.th}>價格</th>
                     <th className={styles.th}>委託量</th>
@@ -256,8 +352,22 @@ function OrdersTable({
             <tbody>
                 {[...trades].reverse().map((t) => {
                     const st = t.status.status;
+                    const canCancel = ACTIVE_STATUSES.has(st);
                     return (
                         <tr key={t.order.id}>
+                            {batch && (
+                                <td className={styles.td}>
+                                    {canCancel && (
+                                        <input
+                                            type='checkbox'
+                                            checked={picked.has(t.order.id)}
+                                            onChange={() =>
+                                                toggle(t.order.id)
+                                            }
+                                        />
+                                    )}
+                                </td>
+                            )}
                             <td className={styles.td}>{t.contract.code}</td>
                             <td
                                 className={`${styles.td} ${panel.dirText[t.order.action === 'Buy' ? 'up' : 'down']}`}
@@ -321,8 +431,9 @@ function OrdersTable({
                         </tr>
                     );
                 })}
-            </tbody>
-        </table>
+                </tbody>
+            </table>
+        </>
     );
 }
 
