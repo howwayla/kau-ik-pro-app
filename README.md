@@ -169,10 +169,67 @@ pnpm dev:all     # 同時啟動 vite 前端 + server（mock 行情與交易）
 SSE events：`tick_stk` / `tick_fop` / `bidask_stk` / `bidask_fop` /
 `order_event` / `heartbeat`。
 
-## Desktop App 桌面版（暫未接線）
+## Desktop App 桌面版（從原始碼建置）
 
-`src-tauri/` 保留自原專案，但目前以 web 模式開發為主；Node server
-尚未包裝為 Tauri sidecar。
+桌面版已接線：Tauri 殼會把 `server/`（用 bun 編成單檔 binary 的 sidecar）
+自動啟動在 `127.0.0.1:8080`，結束時關閉。**clone → 一行指令 → 一個可用的
+桌面 app（mock 模式，免任何憑證／富果帳號）。** 一行指令會自動偵測你的
+平台、把 sidecar 編成 Tauri 需要的正確檔名，你**不用**碰任何 target triple。
+
+> 這是從原始碼自建，不是預先簽章的安裝檔。macOS 自建的 `.app` 不會碰到
+> Gatekeeper（見下方「啟動」）。簽章／公證刻意未做（這是個人開源專案）。
+
+### 由淺到深的三條路（建議照順序）
+
+```sh
+pnpm install
+
+pnpm dev:all         # ① 最快：瀏覽器看 → http://localhost:5173（不需 Rust/bun）
+pnpm desktop:dev     # ② 真正的桌面視窗（開發模式，sidecar 自動啟動）
+pnpm desktop:build   # ③ 產出可安裝的 .app/.dmg | .msi/.exe | .AppImage/.deb/.rpm
+```
+
+第 ① 條只需要 Node + pnpm（見上方 Getting Started）。第 ②③ 條要**多裝**
+桌面建置工具鏈 —— 先跑體檢，它會告訴你缺什麼、怎麼補：
+
+```sh
+pnpm desktop:doctor  # 檢查 node / rust / bun / pnpm，缺的會印出對應安裝指令
+```
+
+### 桌面建置的額外前置（②③ 才需要）
+
+| 工具 | 用途 | 安裝 |
+|---|---|---|
+| **Rust**（rustup） | 編 Tauri 殼 | <https://rustup.rs> |
+| **bun** ≥ 1.1.5 | 把 server 編成 sidecar | `curl -fsSL https://bun.sh/install \| bash`（Win：`powershell -c "irm bun.sh/install.ps1 \| iex"`） |
+| 系統函式庫 | 各 OS 視窗層 | macOS：`xcode-select --install`；Windows：Visual Studio「Desktop development with C++」＋ WebView2（Win11 與多數已更新的 Win10 已內建；若開啟後是空白視窗再裝 WebView2 Evergreen runtime）；Debian/Ubuntu：見下 |
+
+```sh
+# Debian/Ubuntu 系統依賴（完整清單，新機器需要）
+sudo apt update && sudo apt install -y libwebkit2gtk-4.1-dev \
+  build-essential curl wget file libxdo-dev libssl-dev \
+  libayatana-appindicator3-dev librsvg2-dev
+```
+
+> 本 repo 是 **pnpm** 工作區，請用 pnpm（不要用 npm）。沒有 pnpm 就 `corepack enable`。
+
+### 建置與啟動
+
+`pnpm desktop:build` 完成後，安裝檔在 `src-tauri/target/release/bundle/`
+（macOS：`dmg/`＋`macos/`；Windows：`msi/`、`nsis/`；Linux：`appimage/`、
+`deb/`、`rpm/`）。啟動後頂部會顯示**「模擬環境」**徽章，不需任何憑證即可操作。
+
+- **macOS**：自己 build 的 `.app` 直接開即可；若因故被 Gatekeeper 攔，
+  右鍵 →「打開」一次即可（不需關閉 Gatekeeper）。
+- **Windows**：未簽章的 `.msi`/`.exe` 首次執行會跳 SmartScreen「Windows
+  已保護您的電腦」→ 點「其他資訊 → 仍要執行」。想完全避開可改用
+  `pnpm desktop:dev`（不產生安裝檔、不碰 SmartScreen）。
+
+### 建置失敗了？
+
+先跑 `pnpm desktop:doctor`。仍卡住的話，把錯誤訊息對照
+[`AGENTS.md`](AGENTS.md) 的疑難排解表（依錯誤訊息查對應解法）——
+該檔也是給 AI 助手讀的，讓它能直接幫你把卡住的環境救回來。
 
 ## Safety notes 安全提醒與免責聲明
 

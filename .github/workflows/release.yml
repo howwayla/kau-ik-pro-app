@@ -12,22 +12,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `target` is the Rust triple; the bun compile target is derived from it
+        # by scripts/build-desktop.mjs (single source of truth — see TARGETS).
         include:
           - platform: macos-latest
             target: aarch64-apple-darwin
-            bunTarget: bun-darwin-arm64
             args: '--target aarch64-apple-darwin'
           - platform: macos-latest
             target: x86_64-apple-darwin
-            bunTarget: bun-darwin-x64
             args: '--target x86_64-apple-darwin'
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            bunTarget: bun-linux-x64
             args: ''
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            bunTarget: bun-windows-x64
             args: ''
 
     runs-on: ${{ matrix.platform }}
@@ -63,16 +61,12 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # Compile the bundled Node server into a single-file sidecar binary
-      # (replaces the former upstream shioaji sidecar download).
+      # Compile the bundled Node server into a single-file sidecar binary.
+      # Same script users run locally (`pnpm desktop:build`), so the
+      # triple -> bun-target -> filename logic lives in exactly one place.
+      # matrix.target is a trusted, workflow-defined Rust triple (no injection).
       - name: Build nova-server sidecar
-        shell: bash
-        run: |
-          mkdir -p src-tauri/binaries
-          EXT=""
-          if [ "${{ matrix.platform }}" = "windows-latest" ]; then EXT=".exe"; fi
-          bun build server/src/index.ts --compile --target ${{ matrix.bunTarget }} \
-            --outfile "src-tauri/binaries/nova-server-${{ matrix.target }}$EXT"
+        run: node scripts/build-desktop.mjs --sidecar-only --target ${{ matrix.target }}
 
       # Tauri treats a present-but-empty APPLE_ID as "please notarize", so the
       # notarization env is only injected when real credentials exist.
