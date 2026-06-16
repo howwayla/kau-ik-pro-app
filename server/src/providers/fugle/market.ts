@@ -55,6 +55,7 @@ import {
     deliveryMonthOf,
     fromFugleSymbol,
     isContinuousAlias,
+    aliasMonthRank,
     aliasPrefix,
     parseTaifexOption,
     toFugleSymbol,
@@ -564,7 +565,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             .map((t: any) => String(t.symbol ?? ''))
             .filter((s: string) => new RegExp(`^${prefix}[A-L]\\d$`).test(s));
         if (candidates.length === 0) return null;
-        // sort by delivery month and take the nearest non-expired
+        // sort by delivery month
         const now = new Date();
         const scored = candidates
             .map((s: string) => {
@@ -573,10 +574,14 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 return { s, month };
             })
             .sort((a, b) => a.month.localeCompare(b.month));
+        // 依順位取：近月(1)=最近未到期、次月(2)=下一個、遠月(3)=再下一個…
         const current = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-        const front = scored.find((x) => x.month >= current) ?? scored[0]!;
-        this.aliasMap.set(code, front.s);
-        return front.s;
+        const nonExpired = scored.filter((x) => x.month >= current);
+        const ordered = nonExpired.length > 0 ? nonExpired : scored;
+        const rank = aliasMonthRank(code) || 1; // 1=近月
+        const pick = ordered[rank - 1] ?? ordered[ordered.length - 1]!;
+        this.aliasMap.set(code, pick.s);
+        return pick.s;
     }
 
     aliasTarget(code: string): string | undefined {

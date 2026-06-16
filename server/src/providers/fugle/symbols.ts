@@ -18,8 +18,19 @@ export function fromFugleSymbol(symbol: string): string {
     return symbol;
 }
 
+// 連續月別名：app 慣用 R1/R2/R3，富果會員清單匯入則為 1!/2!/3!（TradingView 式）。
+// 兩種都認；數字 = 近月(1)/次月(2)/遠月(3)…的順位。
+const CONTINUOUS_RE = /^(TXF|MXF|TMF|EXF|FXF)(R([1-9])|([1-9])!)$/;
+
 export function isContinuousAlias(code: string): boolean {
-    return /^(TXF|MXF|TMF|EXF|FXF)R[12]$/.test(code);
+    return CONTINUOUS_RE.test(code);
+}
+
+/** 連續月別名的月份順位（近月=1、次月=2、遠月=3…），非別名回 0 */
+export function aliasMonthRank(code: string): number {
+    const m = CONTINUOUS_RE.exec(code);
+    if (!m) return 0;
+    return Number(m[3] ?? m[4]);
 }
 
 export function aliasPrefix(code: string): string {
