@@ -171,6 +171,11 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     // 期貨/選擇權 WS 連線目前綁的盤別（true=夜盤）；翻盤時要重連換 afterHours
     private futoptAfterHours: boolean | null = null;
     private sessionWatch: ReturnType<typeof setInterval> | null = null;
+    // 每條 WS 最後收到封包的時間 — 偵測睡眠後的殭屍連線（連線還在但沒資料）
+    private lastWsMsgAt: { stock: number; futopt: number } = {
+        stock: 0,
+        futopt: 0,
+    };
 
     /** a Fugle API key, or broker-SDK-backed clients (see MarketClientSource) */
     constructor(private source: string | MarketClientSource) {}
@@ -202,20 +207,46 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 `行情 API 回應異常: ${JSON.stringify(probe).slice(0, 200)}`,
             );
         }
-        // 日盤↔夜盤交界時，重連 futopt WS 讓訂閱以新盤別的 afterHours 重建
+        // WS 看門狗：①日↔夜交界重連 futopt 換 afterHours；②偵測睡眠後的
+        // 殭屍連線（market 開著、有訂閱、卻 >45s 沒收到任何封包）並重連。
+        // 後者解決「整夜閒置 → 個股停在 13:30、refresh 無效」（連線還在但
+        // 已死、subscribe() 對既有訂閱 early-return 不會重連）。
+        const STALE_MS = 45_000;
         this.sessionWatch = setInterval(() => {
-            if (this.disposed || !this.futoptWs) return;
-            if (
-                this.futoptAfterHours !== null &&
-                isAfterHoursNow() !== this.futoptAfterHours
-            ) {
+            if (this.disposed) return;
+            const reconnect = (kind: 'stock' | 'futopt') => {
+                const ws = kind === 'stock' ? this.stockWs : this.futoptWs;
                 try {
-                    this.futoptWs.disconnect?.(); // close handler → resubscribe
+                    ws?.disconnect?.(); // close handler → 3s 後 resubscribe
                 } catch {
                     /* already closed */
                 }
+            };
+            // ① futopt 盤別翻轉
+            if (
+                this.futoptWs &&
+                this.futoptAfterHours !== null &&
+                isAfterHoursNow() !== this.futoptAfterHours
+            ) {
+                reconnect('futopt');
+                return; // 重連即會刷新時戳，這輪不再判殭屍
             }
-        }, 60_000);
+            // ② 殭屍連線偵測
+            const now = Date.now();
+            for (const kind of ['stock', 'futopt'] as const) {
+                const ws = kind === 'stock' ? this.stockWs : this.futoptWs;
+                if (!ws || !this.hasSubsFor(kind)) continue;
+                if (!this.marketOpen(kind)) continue; // 收盤沒資料是正常的
+                if (now - this.lastWsMsgAt[kind] > STALE_MS) {
+                    console.warn(
+                        `行情 WS(${kind}) 疑似殭屍（${Math.round(
+                            (now - this.lastWsMsgAt[kind]) / 1000,
+                        )}s 無封包）— 重連`,
+                    );
+                    reconnect(kind);
+                }
+            }
+        }, 20_000);
     }
 
     dispose(): void {
@@ -255,6 +286,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 : await this.source.makeWs();
         const ws = kind === 'stock' ? client.stock : client.futopt;
         ws.on('message', (raw: any) => {
+            this.lastWsMsgAt[kind] = Date.now();
             try {
                 const msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
                 if (process.env.WS_DEBUG) {
@@ -295,12 +327,32 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             throw err;
         }
         this.wsFailedUntil = 0;
+        this.lastWsMsgAt[kind] = Date.now(); // fresh — don't trip the watchdog
         if (kind === 'stock') this.stockWs = ws;
         else {
             this.futoptWs = ws;
             this.futoptAfterHours = isAfterHoursNow(); // bind this connection's session
         }
         return ws;
+    }
+
+    /** 該類商品現在是否在交易時段（殭屍偵測只在「該有資料卻沒資料」時重連） */
+    private marketOpen(kind: 'stock' | 'futopt'): boolean {
+        const min = taipeiMinutes(new Date());
+        if (kind === 'stock') return min >= 9 * 60 && min <= 13 * 60 + 30;
+        // futopt 日盤 08:45–13:45、夜盤 15:00–次日 05:00
+        return (
+            (min >= 8 * 60 + 45 && min <= 13 * 60 + 45) ||
+            min >= 15 * 60 ||
+            min < 5 * 60
+        );
+    }
+
+    private hasSubsFor(kind: 'stock' | 'futopt'): boolean {
+        for (const symbol of this.subs.keys()) {
+            if (this.wsKindFor(symbol) === kind) return true;
+        }
+        return false;
     }
 
     /** WS subscribe params; futopt carries the live-session afterHours flag */
