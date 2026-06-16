@@ -125,6 +125,10 @@ if (sidecarOnly) {
 }
 
 const tauriCmd = dev ? 'dev' : 'build';
+// AppImage bundling shells out to linuxdeploy, itself a FUSE AppImage. Ubuntu
+// 24.04+ ships without libfuse2, so tell the AppImage tooling to extract-and-run
+// instead of mounting via FUSE — otherwise `tauri build` fails at the AppImage step.
+if (process.platform === 'linux') process.env.APPIMAGE_EXTRACT_AND_RUN = '1';
 console.log(
   `\n[2/2] ${dev ? 'starting Tauri dev window' : 'bundling the desktop app'} (\`tauri ${tauriCmd}\`)` +
     `${dev ? '' : ' — Rust release build, this takes several minutes; do not interrupt'}…\n`,
