@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -23,9 +24,12 @@ fn show_main(app: &AppHandle) {
 // Spawn the bundled `nova-server` sidecar (the compiled Node/Fastify server)
 // on 127.0.0.1:8080 — the port the frontend targets in desktop mode
 // (see src/lib/runtime.ts getApiBase()).
-fn spawn_nova_server(app: &AppHandle) {
+fn spawn_nova_server(app: &AppHandle, data_dir: PathBuf) {
     let command = match app.shell().sidecar("nova-server") {
-        Ok(cmd) => cmd.env("HOST", "127.0.0.1").env("PORT", "8080"),
+        Ok(cmd) => cmd
+            .env("HOST", "127.0.0.1")
+            .env("PORT", "8080")
+            .env("KAUIK_DATA_DIR", data_dir.to_string_lossy().to_string()),
         Err(err) => {
             log::error!("failed to create nova-server sidecar: {err}");
             return;
@@ -78,7 +82,9 @@ pub fn run() {
         )
         .setup(|app| {
             // ---- bundled Node server sidecar (auto-started; killed on exit) ----
-            spawn_nova_server(app.handle());
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
+            spawn_nova_server(app.handle(), data_dir);
 
             // ---- tray / menu-bar icon ----
             let show =

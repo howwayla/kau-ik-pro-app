@@ -6,11 +6,11 @@
 // else mock. Broker login failures fall back to mock so the app always
 // boots — switch again from the dashboard once the problem is fixed.
 
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { buildApp } from './app.ts';
 import { credsComplete, loadConfig } from './config.ts';
 import type { AppContext } from './context.ts';
+import { resolveServerDataDir } from './data-dir.ts';
 import {
     buildTradingProvider,
     followMarket,
@@ -27,8 +27,7 @@ import { TriggerStore } from './triggers/store.ts';
 import { SubscriptionRegistry } from './sse/subscriptions.ts';
 import { WatchlistStore } from './watchlist-store.ts';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(here, '..', 'data');
+const dataDir = resolveServerDataDir();
 
 async function main(): Promise<void> {
     const config = loadConfig();

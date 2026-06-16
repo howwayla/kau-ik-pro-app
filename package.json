@@ -12,7 +12,7 @@
         "desktop:build": "node scripts/build-desktop.mjs",
         "desktop:dev": "node scripts/build-desktop.mjs --dev",
         "desktop:doctor": "node scripts/build-desktop.mjs --doctor",
-        "test": "node --test scripts/desktop-targets.test.mjs scripts/preflight.test.mjs"
+        "test": "node --test scripts/desktop-targets.test.mjs scripts/preflight.test.mjs && pnpm --filter kau-ik-pro-server exec tsx src/data-dir.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/sse/wire-market.test.ts"
     },
     "dependencies": {
         "@tauri-apps/api": "^2.11.0",
