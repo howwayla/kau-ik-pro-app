@@ -138,31 +138,47 @@ export function snapshotFromState(
 
 /**
  * WS trades message → SseTick (decimal fields as strings)。
- * 收盤/總結 frame 可能帶 price=0（期貨 13:45 觀察到）— 此時退回
- * state.last 當價格；完全沒有可用價格回 null（呼叫端跳過發送），
- * 否則前端會顯示 0 元、-100%
+ *
+ * 兩種 frame 格式都要相容：
+ *  - 股票：平的 `{ price, size, bid, ask, volume, ... }`
+ *  - 期貨/選擇權：巢狀 `{ trades:[{price,size,bid,ask}], total:{tradeVolume}, ... }`
+ *    （esun/券商 futopt WS 實測格式）。讀錯欄位 → price=0 → 退回 state.last
+ *    → 價格卡死（只有五檔在跳）。取 trades[] 最後一筆當最新成交。
+ *
+ * 收盤/總結 frame 可能帶 price=0（期貨 13:45 觀察到）— 此時退回 state.last；
+ * 完全沒有可用價格回 null（呼叫端跳過發送），否則前端顯示 0 元、-100%。
  */
 export function tickFromTrade(
     symbol: string,
     data: any,
     state: DayState,
 ): SseTick | null {
-    const rawPrice = num(data.price);
+    const last =
+        Array.isArray(data.trades) && data.trades.length > 0
+            ? data.trades[data.trades.length - 1]
+            : null;
+    const px = last ?? data; // 期貨取巢狀最後一筆，股票用平的 data
+    const rawPrice = num(px.price);
+    const tradeSize = num(px.size);
+    const totalVolume =
+        num(data.total?.tradeVolume) || num(data.volume) || state.totalVolume;
     const { date, time } = splitTime(data.time);
-    const isTrial = data.isTrial === true;
+    const isTrial = (px.isTrial ?? data.isTrial) === true;
     if (!isTrial && rawPrice > 0) {
         state.last = rawPrice;
         if (state.open === 0) state.open = rawPrice;
         state.high = Math.max(state.high, rawPrice);
         state.low = state.low === 0 ? rawPrice : Math.min(state.low, rawPrice);
-        state.totalVolume = num(data.volume) || state.totalVolume;
+        state.totalVolume = totalVolume || state.totalVolume;
         state.lastUpdatedMs = Date.now();
     }
-    if (num(data.bid) > 0) state.bid = num(data.bid);
-    if (num(data.ask) > 0) state.ask = num(data.ask);
+    if (num(px.bid) > 0) state.bid = num(px.bid);
+    if (num(px.ask) > 0) state.ask = num(px.ask);
     const price = rawPrice > 0 ? rawPrice : state.last;
     if (price <= 0) return null;
     const chg = price - state.reference;
+    const limitUp = (px.isLimitUpPrice ?? data.isLimitUpPrice) === true;
+    const limitDown = (px.isLimitDownPrice ?? data.isLimitDownPrice) === true;
     return {
         code: symbol,
         date,
@@ -172,9 +188,9 @@ export function tickFromTrade(
         low: fmt(state.low || price),
         close: fmt(price),
         avg_price: fmt(state.avg || price),
-        volume: num(data.size),
-        total_volume: num(data.volume) || state.totalVolume,
-        amount: fmt(price * num(data.size)),
+        volume: tradeSize,
+        total_volume: totalVolume || state.totalVolume,
+        amount: fmt(price * tradeSize),
         total_amount: fmt(state.totalValue),
         // 內外盤: trade at/above ask → buy-side, at/below bid → sell-side
         tick_type:
@@ -191,8 +207,8 @@ export function tickFromTrade(
                 : 0,
         ),
         simtrade: isTrial,
-        ...(data.isLimitUpPrice === true ? { limit_up: true } : {}),
-        ...(data.isLimitDownPrice === true ? { limit_down: true } : {}),
+        ...(limitUp ? { limit_up: true } : {}),
+        ...(limitDown ? { limit_down: true } : {}),
     };
 }
 
