@@ -63,6 +63,10 @@ import {
 
 const QUOTE_TTL_MS = 10_000;
 const OPT_QUOTE_TTL_MS = 60_000;
+// 行情 REST quote 並發上限：富邦行情後端對「大量同時 quote」會整批失敗
+//（自選清單一次載入 30+ 檔 → seed 全空白、盤後尤其明顯）。限同時在途數
+// 把突發攤平、配合 in-flight 去重與 seed 退避重試，讓批次載入可靠 seed。
+const REST_QUOTE_CONCURRENCY = 3;
 const TICKERS_TTL_MS = 10 * 60_000;
 const WS_CONNECT_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 10_000;
@@ -156,6 +160,10 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     private sdk: any;
 
     private quoteCache = new Map<string, CacheEntry>(); // by fugle symbol
+    // REST quote 並發節流 + 同符號 in-flight 去重
+    private restActive = 0;
+    private restWaiters: Array<() => void> = [];
+    private quoteInflight = new Map<string, Promise<CacheEntry | null>>();
     private contractCache = new Map<string, ContractInfo>();
     private optChain: OptContract[] | null = null;
     private optChainAt = 0;
@@ -479,8 +487,21 @@ export class FugleMarketDataProvider implements MarketDataProvider {
 
     // ---- REST quote cache ----
 
+    /** 並發節流：限制同時在途的 REST quote 數，把批次突發攤平 */
+    private async withQuoteSlot<T>(fn: () => Promise<T>): Promise<T> {
+        if (this.restActive >= REST_QUOTE_CONCURRENCY) {
+            await new Promise<void>((r) => this.restWaiters.push(r));
+        }
+        this.restActive += 1;
+        try {
+            return await fn();
+        } finally {
+            this.restActive -= 1;
+            this.restWaiters.shift()?.();
+        }
+    }
+
     private async fetchQuote(symbol: string): Promise<CacheEntry | null> {
-        const isFutopt = this.wsKindFor(symbol) === 'futopt';
         const ttl = symbol.startsWith('TXO') ? OPT_QUOTE_TTL_MS : QUOTE_TTL_MS;
         const cached = this.quoteCache.get(symbol);
         if (cached && Date.now() - cached.fetchedAt < ttl) return cached;
@@ -488,6 +509,23 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         if (cached && Date.now() - cached.state.lastUpdatedMs < QUOTE_TTL_MS) {
             return cached;
         }
+        // 同符號去重：seed 與 snapshot 同檔同時打 → 共用一次 REST
+        const inflight = this.quoteInflight.get(symbol);
+        if (inflight) return inflight;
+        const task = this.withQuoteSlot(() => this.fetchQuoteRest(symbol, cached));
+        this.quoteInflight.set(symbol, task);
+        try {
+            return await task;
+        } finally {
+            this.quoteInflight.delete(symbol);
+        }
+    }
+
+    private async fetchQuoteRest(
+        symbol: string,
+        cached: CacheEntry | undefined,
+    ): Promise<CacheEntry | null> {
+        const isFutopt = this.wsKindFor(symbol) === 'futopt';
         try {
             const q = isFutopt
                 ? await this.rest.futopt.intraday.quote({
@@ -1154,18 +1192,10 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         const entry = await this.fetchQuote(symbol);
         // REST quote 已帶最後五檔 — 直接 seed 深度面板，不必等 WS snapshot
         if (quote === 'BidAsk') {
-            if (entry?.book) {
-                this.pushBookSeed(symbol, entry.book);
-            } else {
-                // 暫時性失敗（剛重啟、上游瞬斷）：稍後自動補 seed，
-                // 不讓深度面板停在空白等用戶重整
-                setTimeout(() => {
-                    if (!this.subs.get(symbol)?.has('BidAsk')) return;
-                    void this.fetchQuote(symbol).then((e) => {
-                        if (e?.book) this.pushBookSeed(symbol, e.book);
-                    });
-                }, 3000);
-            }
+            if (entry?.book) this.pushBookSeed(symbol, entry.book);
+            // 無 book（批次載入時被節流擠掉、或上游瞬斷）→ 退避重試補 seed，
+            // 不讓深度面板永遠空白
+            else this.seedBookWithRetry(symbol);
         }
         let set = this.subs.get(symbol);
         if (!set) {
@@ -1176,6 +1206,20 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         set.add(quote);
         const ws = await this.ensureWs(this.wsKindFor(symbol));
         ws.subscribe(this.wsSubParams(symbol, quote === 'Tick' ? 'trades' : 'books'));
+    }
+
+    /** 退避重試補五檔 seed：批次載入被節流擠掉時，等負載退去再補 */
+    private seedBookWithRetry(symbol: string, attempt = 0): void {
+        const delays = [2000, 4000, 8000, 14000];
+        if (attempt >= delays.length) return;
+        setTimeout(() => {
+            if (!this.subs.get(symbol)?.has('BidAsk')) return; // 已退訂
+            if (this.quoteCache.get(symbol)?.book) return; // 已被 WS/seed 補上
+            void this.fetchQuote(symbol).then((e) => {
+                if (e?.book) this.pushBookSeed(symbol, e.book);
+                else this.seedBookWithRetry(symbol, attempt + 1);
+            });
+        }, delays[attempt]);
     }
 
     private pushBookSeed(
