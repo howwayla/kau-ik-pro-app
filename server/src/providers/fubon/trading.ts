@@ -3,7 +3,7 @@
 // Verified against fubon-neo 2.2.2 trade.d.ts, the sdk-core 2.2.8 source
 // and the official docs — see map.ts for the fact list. The SDK ships as
 // a manually-downloaded .tgz (not on npm):
-//   pnpm --filter nova-pro-server add file:vendor/fubon-neo-<version>.tgz
+//   pnpm --filter kau-ik-pro-server add file:vendor/fubon-neo-<version>.tgz
 // Every call is synchronous and returns Response{isSuccess, data, message}.
 // Order reports stream automatically after login via the (err, event)
 // callbacks — no manual websocket connect step.
@@ -96,7 +96,7 @@ export class FubonTradingProvider implements TradingProvider {
         } catch {
             throw new Error(
                 '找不到 fubon-neo SDK — 請從富邦官網下載 .tgz 放入 server/vendor/ 並執行 ' +
-                    'pnpm --filter nova-pro-server add file:vendor/fubon-neo-<version>.tgz',
+                    'pnpm --filter kau-ik-pro-server add file:vendor/fubon-neo-<version>.tgz',
             );
         }
         this.sdk = new mod.FubonSDK();

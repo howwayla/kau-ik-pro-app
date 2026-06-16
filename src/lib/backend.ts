@@ -1,4 +1,4 @@
-// src/lib/backend.ts — REST client for the local nova-pro-server
+// src/lib/backend.ts — REST client for the local kau-ik-pro-server
 
 import { apiDelete, apiGet, apiPost, apiPut } from './api';
 import type {

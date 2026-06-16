@@ -1,4 +1,4 @@
-# AGENTS.md — for AI assistants helping someone build & run Nova Pro
+# AGENTS.md — for AI assistants helping someone build & run Kau-ik Pro
 
 This file is operational context for an AI coding assistant (Claude Code, Cursor,
 Codex, etc.). Your job: get a **willing but non-expert user** from `git clone`
@@ -83,7 +83,7 @@ The build log is the source of truth. Find the substring, apply the fix, re-run.
 | `nova-server-<triple> not found` / `failed to bundle … external binary` | sidecar name/path mismatch | re-run `pnpm desktop:build`; confirm `src-tauri/binaries/` holds the host-triple name |
 | `ERR_PNPM … frozen-lockfile` / lockfile mismatch | clone drift | `pnpm install` (without `--frozen-lockfile`) |
 | build is silent for several minutes | Rust release compile is quiet | **wait** — do not Ctrl-C; first build can take 5–15 min |
-| (mac) `"Nova Pro" is damaged / cannot be opened` | adhoc-unsigned, quarantined | right-click the app → Open (don't disable Gatekeeper) |
+| (mac) `"Kau-ik Pro" is damaged / cannot be opened` | adhoc-unsigned, quarantined | right-click the app → Open (don't disable Gatekeeper) |
 | (Win) `Windows protected your PC` (SmartScreen) | unsigned installer | More info → Run anyway, or use `pnpm desktop:dev` |
 | (Win) blank white window on launch | WebView2 missing (old Windows) | install the WebView2 Evergreen runtime |
 | `musl` / Alpine build error | WebKitGTK unsupported on musl | build on a glibc distro (Debian/Ubuntu/Fedora) |

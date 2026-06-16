@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Build the Nova Pro desktop app from source — one command, any supported OS.
+// Build the Kau-ik Pro desktop app from source — one command, any supported OS.
 //
 // What it does (so you never have to type a target triple):
 //   1. preflight: check node/rust/bun/pnpm, print exact fixes for anything missing

@@ -1,4 +1,4 @@
-# Nova Pro — 專業交易終端 Trading Terminal
+# Kau-ik Pro — 專業交易終端 Trading Terminal
 
 A professional, fully-customizable trading terminal for Taiwan markets
 (TWSE / TPEX / TAIFEX). Forked from
@@ -6,7 +6,7 @@ A professional, fully-customizable trading terminal for Taiwan markets
 
 - **多券商交易** — 台新 [Nova API](https://ml-fugle-api.tssco.com.tw/FugleSDK/docs/trading/introduction/)（`taishin-sdk`）、
   富邦[新一代 API](https://www.fbs.com.tw/TradeAPI/docs/trading/introduction)（`fubon-neo`）、
-  玉山富果（`@esun/trade`）— UI 熱切換，SDK 已隨 repo 提供（clone 即用）
+  玉山證券（`@esun/trade`）— UI 熱切換，SDK 已隨 repo 提供（clone 即用）
 - **行情** — [富果行情 API](https://developer.fugle.tw/docs/data/intro)（REST + WebSocket），
   或隨券商自帶行情自動切換
 - **Topstep 式圖表部位管理** — 圖上拖曳停損/停利、一鍵保本、
@@ -29,7 +29,7 @@ React 前端 ── HTTP REST + SSE ──► server/（Fastify）
 以專業交易終端為目標：即時行情、K 線、五檔、閃電下單、圖表點價下單、
 停損停利觸價單、可拖拉的自訂版面。
 
-![Nova Pro — 圖表部位管理：持倉均價線、可拖曳的停損/停利線、一鍵保本](docs/screenshot-dark.png)
+![Kau-ik Pro — 圖表部位管理：持倉均價線、可拖曳的停損/停利線、一鍵保本](docs/screenshot-dark.png)
 
 | Dark | Light |
 |------|-------|

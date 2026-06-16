@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Nova Pro",
+  "productName": "Kau-ik Pro",
   "version": "0.1.0",
-  "identifier": "io.github.howwayla.novapro",
+  "identifier": "io.github.howwayla.kauikpro",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Nova Pro — 交易終端",
+        "title": "Kau-ik Pro — 交易終端",
         "width": 1680,
         "height": 980,
         "minWidth": 1100,

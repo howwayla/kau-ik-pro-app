@@ -3,7 +3,7 @@
 // Written against taishin-sdk 1.0.2 (napi typings in core.d.ts) and the
 // official Nova docs. Implementation notes:
 //   - the SDK is synchronous (napi over a Rust core) and ships as a .tgz:
-//     `pnpm --filter nova-pro-server add file:vendor/taishin-sdk-<v>.tgz`
+//     `pnpm --filter kau-ik-pro-server add file:vendor/taishin-sdk-<v>.tgz`
 //   - the constructor MUST receive the API base URL; the production
 //     endpoint is https://fugletrade.tssco.com.tw (an empty default makes
 //     login die with "EOF while parsing a value"). Override with
@@ -84,7 +84,7 @@ export class NovaTradingProvider implements TradingProvider {
         } catch {
             throw new Error(
                 '找不到 taishin-sdk — 請將 taishin-sdk-<version>.tgz 放入 server/vendor/ 並執行 ' +
-                    'pnpm --filter nova-pro-server add file:vendor/taishin-sdk-<version>.tgz',
+                    'pnpm --filter kau-ik-pro-server add file:vendor/taishin-sdk-<version>.tgz',
             );
         }
         this.sdk = new mod.TaishinSDK(apiUrl || PROD_URL);

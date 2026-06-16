@@ -104,7 +104,7 @@ export class EsunTradingProvider implements TradingProvider {
         } catch {
             throw new Error(
                 '找不到 @esun/trade — 請將 esun-trade-<version>.tgz 放入 server/vendor/ 並執行 ' +
-                    'pnpm --filter nova-pro-server add file:vendor/esun-trade-<version>.tgz',
+                    'pnpm --filter kau-ik-pro-server add file:vendor/esun-trade-<version>.tgz',
             );
         }
         try {
