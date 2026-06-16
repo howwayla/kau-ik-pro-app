@@ -8,7 +8,11 @@
         "dev:server": "pnpm --filter nova-pro-server dev",
         "dev:all": "concurrently -k \"pnpm dev\" \"pnpm dev:server\"",
         "build": "tsc -b && vite build",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "desktop:build": "node scripts/build-desktop.mjs",
+        "desktop:dev": "node scripts/build-desktop.mjs --dev",
+        "desktop:doctor": "node scripts/build-desktop.mjs --doctor",
+        "test": "node --test scripts/desktop-targets.test.mjs scripts/preflight.test.mjs"
     },
     "dependencies": {
         "@tauri-apps/api": "^2.11.0",
