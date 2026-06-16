@@ -94,6 +94,13 @@ export interface Snapshot {
 /** futopt 盤別：日盤 / 夜盤(盤後) / 全(日+夜連續)。股票/指數忽略 */
 export type MarketSession = 'day' | 'afterhours' | 'all';
 
+/** 代碼/名稱搜尋結果一筆 */
+export interface SymbolHit {
+    code: string;
+    name: string;
+    type: SecurityType;
+}
+
 export interface KBars {
     datetime: string[]; // "YYYY-MM-DD HH:mm:ss" Taiwan wall clock
     Open: number[];

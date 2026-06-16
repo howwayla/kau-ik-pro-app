@@ -129,7 +129,19 @@ function BlockBody({
         case 'chart':
             return contract ? (
                 <>
-                    <QuoteBoard contract={contract} snapshot={snapshot} />
+                    <QuoteBoard
+                        contract={contract}
+                        snapshot={snapshot}
+                        watched={watchlistProps.items.some(
+                            (i) => i.contract.code === contract.code,
+                        )}
+                        onAddWatch={() =>
+                            void watchlistProps.onAdd(
+                                contract.code,
+                                contract.security_type,
+                            )
+                        }
+                    />
                     <CandleChart
                         contract={contract}
                         trades={dockProps.trades}
@@ -452,6 +464,8 @@ export default function App() {
         reportDailyPnl(unrealized + settle);
     }, [positionsPoll.data, marginPoll.data]);
 
+    // 點排行榜/搜尋只「選取檢視」，不自動加進追蹤清單（要加清單走 ＋ 鈕）。
+    // ensureContract 解析合約並訂閱即時行情，但不寫入 watchlist。
     const selectByCode = useCallback(
         async (code: string) => {
             const existing = items.find((i) => i.contract.code === code);
@@ -460,13 +474,13 @@ export default function App() {
                 return;
             }
             try {
-                const c = (await addSymbol(code, 'STK')) as ContractInfo;
+                const c = await ensureContract(code);
                 setSelected(c);
             } catch {
                 // unknown code from scanner — ignore
             }
         },
-        [items, addSymbol],
+        [items],
     );
 
     const selectedSnapshot = useMemo(

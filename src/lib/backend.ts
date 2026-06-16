@@ -176,6 +176,18 @@ export function fetchSnapshots(contracts: ContractBase[]) {
 
 export type MarketSession = 'day' | 'afterhours' | 'all';
 
+export interface SymbolHit {
+    code: string;
+    name: string;
+    type: 'STK' | 'FUT' | 'OPT' | 'IND' | null;
+}
+
+export function fetchSymbolSearch(q: string) {
+    return apiGet<SymbolHit[]>(
+        `/api/v1/data/search?q=${encodeURIComponent(q)}`,
+    );
+}
+
 export function fetchKbars(
     contract: ContractBase,
     start: string,

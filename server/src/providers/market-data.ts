@@ -15,6 +15,7 @@ import type {
     Snapshot,
     SseBidAsk,
     SseTick,
+    SymbolHit,
 } from '../types/dto.ts';
 
 export interface ContractKey {
@@ -61,6 +62,8 @@ export interface MarketDataProvider {
         end: string,
         session?: MarketSession,
     ): Promise<KBars>;
+    /** 依代碼前綴或名稱子字串搜尋上市櫃標的（加追蹤用） */
+    searchSymbols(query: string): Promise<SymbolHit[]>;
     ticks(
         key: ContractKey,
         date: string,

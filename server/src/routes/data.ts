@@ -73,6 +73,11 @@ export function registerDataRoutes(
         async (req) => ctx.market.volumes(req.body.contract),
     );
 
+    app.get<{ Querystring: { q?: string } }>(
+        '/api/v1/data/search',
+        async (req) => ctx.market.searchSymbols(req.query.q ?? ''),
+    );
+
     app.post<{
         Body: {
             contract: ContractKey;

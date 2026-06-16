@@ -10,9 +10,14 @@ import * as styles from './quote-board.css';
 export function QuoteBoard({
     contract,
     snapshot,
+    watched,
+    onAddWatch,
 }: {
     contract: ContractInfo;
     snapshot?: Snapshot;
+    /** 是否已在追蹤清單；未提供則不顯示追蹤鈕 */
+    watched?: boolean;
+    onAddWatch?: () => void;
 }) {
     const quote = useQuote(contract.code);
     const tick = quote?.tick;
@@ -38,6 +43,20 @@ export function QuoteBoard({
             <div className={styles.symbolBlock}>
                 <span className={styles.symbolCode}>{contract.code}</span>
                 <span className={styles.symbolName}>{contract.name}</span>
+                {onAddWatch &&
+                    (watched ? (
+                        <span className={styles.watchedTag} title='已在追蹤清單'>
+                            ★ 追蹤中
+                        </span>
+                    ) : (
+                        <button
+                            className={styles.addWatchBtn}
+                            title='加入追蹤清單'
+                            onClick={onAddWatch}
+                        >
+                            ＋ 追蹤
+                        </button>
+                    ))}
             </div>
 
             <span className={styles.bigPrice[dir]}>

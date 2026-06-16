@@ -153,6 +153,55 @@ export const addInput = style({
     },
 });
 
+// 加追蹤的代碼/名稱搜尋下拉（浮在輸入列上方）
+export const searchMenu = style({
+    position: 'absolute',
+    bottom: '100%',
+    left: vars.space.sm,
+    right: vars.space.sm,
+    marginBottom: '2px',
+    background: vars.color.inset,
+    border: `1px solid ${vars.color.border}`,
+    borderRadius: vars.radius.sm,
+    overflow: 'hidden',
+    zIndex: 50,
+    boxShadow: '0 -4px 16px rgba(0,0,0,0.35)',
+    maxHeight: '240px',
+    overflowY: 'auto',
+});
+
+export const searchItem = style({
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: vars.space.sm,
+    width: '100%',
+    textAlign: 'left',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: `1px solid ${vars.color.border}`,
+    padding: '5px 10px',
+    cursor: 'pointer',
+    ':hover': {
+        background: vars.color.muted,
+    },
+});
+
+export const searchCode = style({
+    fontFamily: vars.font.mono,
+    fontSize: '0.76rem',
+    fontWeight: 600,
+    color: vars.color.foreground,
+    minWidth: '3.4rem',
+});
+
+export const searchName = style({
+    fontSize: '0.7rem',
+    color: vars.color.mutedForeground,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+});
+
 export const typeSelect = style({
     fontFamily: vars.font.body,
     fontSize: '0.72rem',

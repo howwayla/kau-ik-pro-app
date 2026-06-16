@@ -29,6 +29,7 @@ import type {
     Snapshot,
     SseBidAsk,
     SseTick,
+    SymbolHit,
 } from '../../types/dto.ts';
 import type {
     BidAskChannel,
@@ -1051,6 +1052,56 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         } catch {
             return []; // 前端 fallback 用逐筆累計
         }
+    }
+
+    // ---- 代碼/名稱搜尋（加追蹤用）----
+    private symbolDir: { code: string; name: string }[] | null = null;
+    private symbolDirAt = 0;
+
+    private async ensureSymbolDir(): Promise<{ code: string; name: string }[]> {
+        if (this.symbolDir && Date.now() - this.symbolDirAt < 12 * 3600_000) {
+            return this.symbolDir;
+        }
+        const all: { code: string; name: string }[] = [];
+        for (const market of ['TSE', 'OTC']) {
+            try {
+                const res = await this.rest.stock.intraday.tickers({
+                    type: 'EQUITY',
+                    market,
+                });
+                for (const r of res?.data ?? []) {
+                    const code = String(r.symbol ?? '');
+                    const name = String(r.name ?? '');
+                    if (code) all.push({ code, name });
+                }
+            } catch {
+                // 該市場抓不到就略過，有多少用多少
+            }
+        }
+        if (all.length) {
+            this.symbolDir = all;
+            this.symbolDirAt = Date.now();
+        }
+        return this.symbolDir ?? [];
+    }
+
+    async searchSymbols(query: string): Promise<SymbolHit[]> {
+        const q = query.trim();
+        if (!q) return [];
+        const dir = await this.ensureSymbolDir();
+        const lower = q.toLowerCase();
+        const hits = dir.filter(
+            (s) =>
+                s.code.toLowerCase().startsWith(lower) || s.name.includes(q),
+        );
+        const rank = (s: { code: string; name: string }) =>
+            s.code === q ? 0 : s.code.toLowerCase().startsWith(lower) ? 1 : 2;
+        hits.sort((a, b) => rank(a) - rank(b) || a.code.localeCompare(b.code));
+        return hits.slice(0, 20).map((s) => ({
+            code: s.code,
+            name: s.name,
+            type: 'STK' as const,
+        }));
     }
 
     // credit/short-source data has no fugle source — frontend handles empty

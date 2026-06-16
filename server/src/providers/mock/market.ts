@@ -5,6 +5,7 @@ import type {
     ContractInfo,
     CreditEnquire,
     HistoryTicks,
+    SymbolHit,
     MarketSession,
     KBars,
     OptContract,
@@ -100,6 +101,12 @@ export class MockMarketDataProvider implements MarketDataProvider {
 
     async volumes(): Promise<never[]> {
         return []; // mock 無官方分價量 — 前端 fallback 用逐筆累計
+    }
+
+    async searchSymbols(query: string): Promise<SymbolHit[]> {
+        return this.engine
+            .searchSymbols(query)
+            .map((s) => ({ ...s, type: 'STK' as const }));
     }
 
     async scanner(
