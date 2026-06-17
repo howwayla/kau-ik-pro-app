@@ -25,6 +25,18 @@ await check('uses KAUIK_DATA_DIR when the server is running from a bun compiled 
     );
 });
 
+await check('uses macOS Application Support when a packaged bun sidecar has no data dir env', () => {
+    assert.equal(
+        resolveServerDataDir({
+            env: { HOME: '/Users/me' },
+            metaUrl: 'file:///$bunfs/root/nova-server-aarch64-apple-darwin',
+            cwd: '/',
+            platform: 'darwin',
+        }),
+        '/Users/me/Library/Application Support/io.github.howwayla.kauikpro',
+    );
+});
+
 await check('keeps the source checkout server/data path for tsx development', () => {
     assert.equal(
         resolveServerDataDir({
