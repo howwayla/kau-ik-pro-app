@@ -80,6 +80,7 @@ The build log is the source of truth. Find the substring, apply the fix, re-run.
 | host triple ends in `-windows-gnu` (Windows) | Rust on GNU toolchain | `rustup default stable-x86_64-pc-windows-msvc` |
 | `libwebkit2gtk-4.1 … not found` / `glib-2.0 not found` (Linux) | system libs missing | run the apt list in README; needs Ubuntu 22.04+ |
 | `failed to run linuxdeploy` (Linux, AppImage step) | linuxdeploy (a FUSE AppImage) is unreliable on Ubuntu 24.04+ | the build script already skips AppImage on Linux (builds `.deb`/`.rpm`); you should not hit this via `pnpm desktop:build`. If you force AppImage, install libfuse2 or set `APPIMAGE_EXTRACT_AND_RUN=1` |
+| `failed to read plugin permissions` with an old `src-tauri/target` path | stale Tauri/Rust build cache after moving or renaming the checkout | `pnpm desktop:build` auto-runs `cargo clean --manifest-path src-tauri/Cargo.toml` and retries once. If running Tauri by hand, run that clean command, then re-run the build |
 | `nova-server-<triple> not found` / `failed to bundle … external binary` | sidecar name/path mismatch | re-run `pnpm desktop:build`; confirm `src-tauri/binaries/` holds the host-triple name |
 | `ERR_PNPM … frozen-lockfile` / lockfile mismatch | clone drift | `pnpm install` (without `--frozen-lockfile`) |
 | build is silent for several minutes | Rust release compile is quiet | **wait** — do not Ctrl-C; first build can take 5–15 min |
