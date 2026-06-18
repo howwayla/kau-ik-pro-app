@@ -12,7 +12,8 @@
         "desktop:build": "node scripts/build-desktop.mjs",
         "desktop:dev": "node scripts/build-desktop.mjs --dev",
         "desktop:doctor": "node scripts/build-desktop.mjs --doctor",
-        "test": "node --test scripts/desktop-targets.test.mjs scripts/preflight.test.mjs"
+        "test": "node --test scripts/desktop-targets.test.mjs scripts/preflight.test.mjs && pnpm test:ui",
+        "test:ui": "node scripts/run-ui-tests.mjs"
     },
     "dependencies": {
         "@tauri-apps/api": "^2.11.0",
@@ -35,6 +36,7 @@
         "@vanilla-extract/vite-plugin": "^5.2.2",
         "@vitejs/plugin-react": "^6.0.1",
         "concurrently": "^9.1.0",
+        "tsx": "^4.19.0",
         "typescript": "~5.9.3",
         "vite": "^8.0.1"
     }
