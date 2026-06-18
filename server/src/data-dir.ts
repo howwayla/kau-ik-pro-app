@@ -35,7 +35,6 @@ export function resolveServerDataDir(
     if (dataDir) return resolve(dataDir);
 
     const metaUrl = options.metaUrl ?? import.meta.url;
-    const cwd = options.cwd ?? process.cwd();
     const platform = options.platform ?? process.platform;
     const here = dirname(fileURLToPath(metaUrl));
 

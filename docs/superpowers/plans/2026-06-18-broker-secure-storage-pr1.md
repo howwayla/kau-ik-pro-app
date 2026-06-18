@@ -122,7 +122,7 @@ Expected: `ALL GREEN`.
 
 Modify `package.json` so `pnpm test` runs `server/src/broker-credential-parts.test.ts`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add package.json server/src/broker-credential-parts.ts server/src/broker-credential-parts.test.ts docs/superpowers/plans/2026-06-18-broker-secure-storage-pr1.md
@@ -135,14 +135,14 @@ git commit -m "test: add broker credential split helpers"
 - Modify: `server/src/runtime-config.ts`
 - Create: `server/src/runtime-config.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create tests proving:
 - Legacy `brokerCreds.fubon` loads and is exposed for migration.
 - `set()` writes `brokerMetadata` but does not write `idNo`, `password`, `apiKey`, `apiSecret`, or `certPass`.
 - `tradeProvider` defaults to `mock` unless explicitly persisted.
 
-- [ ] **Step 2: Verify tests fail**
+- [x] **Step 2: Verify tests fail**
 
 Run:
 
@@ -152,11 +152,11 @@ pnpm --filter kau-ik-pro-server exec tsx src/runtime-config.test.ts
 
 Expected: failure because metadata-only persistence does not exist yet.
 
-- [ ] **Step 3: Implement metadata-only runtime config**
+- [x] **Step 3: Implement metadata-only runtime config**
 
 Add `brokerMetadata` to `RuntimeConfig`, keep `legacyBrokerCreds` readable in memory for migration, and make writes omit secret fields.
 
-- [ ] **Step 4: Verify runtime config tests pass**
+- [x] **Step 4: Verify runtime config tests pass**
 
 Run:
 
