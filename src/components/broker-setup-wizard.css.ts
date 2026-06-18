@@ -1,4 +1,4 @@
-import { style, styleVariants } from '@vanilla-extract/css';
+import { globalStyle, style, styleVariants } from '@vanilla-extract/css';
 import { vars } from '../theme.css';
 
 export const overlay = style({
@@ -141,17 +141,19 @@ export const brokerButton = style({
         '&[aria-pressed="true"]:hover': {
             borderColor: vars.color.accent,
         },
-        '& strong': {
-            fontFamily: vars.font.display,
-            fontSize: '0.9rem',
-        },
-        '& span': {
-            fontSize: '0.68rem',
-            color: vars.color.mutedForeground,
-            lineHeight: 1.35,
-            whiteSpace: 'normal',
-        },
     },
+});
+
+globalStyle(`${brokerButton} strong`, {
+    fontFamily: vars.font.display,
+    fontSize: '0.9rem',
+});
+
+globalStyle(`${brokerButton} span`, {
+    fontSize: '0.68rem',
+    color: vars.color.mutedForeground,
+    lineHeight: 1.35,
+    whiteSpace: 'normal',
 });
 
 export const fieldGrid = style({
@@ -254,24 +256,25 @@ export const summary = style({
     background: vars.color.inset,
     border: `1px solid ${vars.color.border}`,
     borderRadius: vars.radius.md,
-    selectors: {
-        '& div': {
-            display: 'grid',
-            gridTemplateColumns: '7rem minmax(0, 1fr)',
-            gap: vars.space.md,
-            alignItems: 'baseline',
-        },
-        '& span': {
-            fontSize: '0.68rem',
-            color: vars.color.mutedForeground,
-        },
-        '& strong': {
-            minWidth: 0,
-            overflowWrap: 'anywhere',
-            fontSize: '0.78rem',
-            color: vars.color.foreground,
-        },
-    },
+});
+
+globalStyle(`${summary} div`, {
+    display: 'grid',
+    gridTemplateColumns: '7rem minmax(0, 1fr)',
+    gap: vars.space.md,
+    alignItems: 'baseline',
+});
+
+globalStyle(`${summary} span`, {
+    fontSize: '0.68rem',
+    color: vars.color.mutedForeground,
+});
+
+globalStyle(`${summary} strong`, {
+    minWidth: 0,
+    overflowWrap: 'anywhere',
+    fontSize: '0.78rem',
+    color: vars.color.foreground,
 });
 
 export const footer = style({
