@@ -1,6 +1,9 @@
 # Broker Login UX and Secure Storage Design
 
 Date: 2026-06-17
+Reviewed: 2026-06-18 — read "Implementation Review" before building. Two open
+decisions should be resolved first: the target persona, and where secure
+storage lives (Rust/Tauri layer vs Node/Bun sidecar).
 
 ## Purpose
 
@@ -32,6 +35,90 @@ switching fast once setup is complete.
 
 Each broker gets one saved setup in the first version. Users who need to change
 accounts use "Change login data" to replace that broker's setup.
+
+## Implementation Review (2026-06-18)
+
+Reviewed against the current codebase before implementation. Most of the
+user-facing flow described below is already built (see "Already exists" for the
+specific files); the genuinely new and hard part is OS secure storage. Resolve
+the two open decisions before Codex starts.
+
+### Open Decisions (resolve first)
+
+1. **Target persona.** The Purpose targets "non-technical users without
+   understanding environment variables." The project's stated audience is
+   people willing to build from source with AI assistance (clone → build → run →
+   recover from errors). These are different personas, and which one we mean
+   changes how much of the UI polish (Broker Center rebrand, file picker, daily
+   notices) is worth building now versus later. Confirm whether this is a
+   deliberate broadening. If it is not, prioritize the storage and
+   certificate-import improvements and treat the UI rebrand as optional.
+
+2. **Where secure storage lives — Rust/Tauri layer vs Node/Bun sidecar.** This
+   spec places `BrokerSecretStore` in the Node sidecar (see "Secure Storage
+   Abstraction"). That is the riskiest placement:
+   - Node OS-keychain access almost always goes through `keytar`, which is
+     archived and effectively unmaintained (confirm current state during the
+     spike).
+   - The sidecar ships as a single `bun --compile` binary. The three commits
+     immediately before this spec on this branch were all fixing
+     bun-compiled-sidecar filesystem problems (`persist sidecar data outside
+     bunfs`, `use app data dir for packaged server`, `retry stale tauri cache
+     build`). Bundling a native Node addon into that binary is exactly the kind
+     of thing that runs under `dev` and breaks once packaged.
+   - Recommended default: do keychain access in the **Rust/Tauri layer**
+     (e.g. `keyring-rs`) and have the sidecar request assembled credentials over
+     the existing local HTTP boundary or a Tauri command. The spike (Rollout
+     step 1) must compare both placements on a *packaged* build, not just `dev`.
+
+### Already exists — do not rebuild
+
+These are implemented today; extend them rather than re-create:
+
+- Per-broker login forms for fubon / nova (Taishin) / esun + mock —
+  `src/components/hud-header.tsx:330` (`BrokerMenu()`).
+- Credential precedence (request body → `server/data/config.json` → env vars) —
+  `server/src/provider-switch.ts:23` (`resolveBrokerCreds()`).
+- Broker-specific fields, saved-credential skip, and "log in with a different
+  account" — `src/components/hud-header.tsx`.
+- `GET` / `POST /api/v1/config/trade` login + hot-swap route —
+  `server/src/routes/config.ts:75`.
+- Credential type (`BrokerCreds`) and broker enum (`BrokerName`) —
+  `server/src/config.ts`.
+
+Genuinely new or large-change work is only: (1) OS keychain, (2) certificate
+import into the app data folder (today the SDKs read the user's original
+absolute path), (3) file-picker UI (today it is a plain text field for the
+path), (4) Broker Center rebrand, (5) startup preference / auto-login, (6) daily
+real-environment notice, (7) `config.json` → metadata-only migration.
+
+### Recommended build sequence (two PRs, not one)
+
+The eight-step rollout is one very large PR. Split it:
+
+- **PR 1 (high value, low risk):** file picker + certificate import into app
+  data + move only the text secrets into the keychain, with `config.json`
+  reduced to metadata. This removes today's two real pain points — pasting
+  absolute certificate paths, and plaintext passwords in `config.json`.
+- **PR 2 (polish):** Broker Center rebrand, startup preference / auto-login,
+  daily real-environment notice.
+
+### Smaller notes
+
+- **The Linux fallback gives no security gain.** The "local user-only file"
+  fallback is functionally identical to today's `config.json` (plaintext,
+  owner-only). Acceptable, but say so plainly in the UI so a user on a
+  Secret-Service-less Linux box knows they are at status quo, not protected.
+- **Test migration against a live config first.** `server/data/config.json`
+  currently holds complete nova + fubon credentials (passwords, certificate
+  paths, certificate passwords). Back it up before running migration code — the
+  first real migration target is the maintainer's own machine.
+- **Keeping the certificate file as a plaintext, owner-only file is correct.** A
+  `.pfx` / `.p12` is already protected by its certificate password; with that
+  password in the keychain, the file alone is useless. The "no secondary cert
+  encryption" non-goal is the right call for v1.
+- The error-translation list already covers "Taishin session already in use by
+  another app," which has bitten this project before. Keep it.
 
 ## Broker Coverage
 
@@ -237,6 +324,13 @@ object is assembled from metadata plus secure storage at the boundary.
 This keeps provider code focused on broker SDK behavior and keeps storage
 decisions isolated.
 
+> **Review (2026-06-18):** The interface is the right shape, but its *placement*
+> is an open decision (see Implementation Review → Open Decisions #2). If
+> keychain access ends up in the Rust/Tauri layer, this interface still lives in
+> the sidecar but its implementation calls out to Tauri rather than to a native
+> Node keychain module. Decide placement in the spike before writing the
+> implementation.
+
 ## Migration
 
 Existing users may already have `brokerCreds` in `config.json`. The migration
@@ -303,7 +397,10 @@ Manual verification:
 
 ## Rollout Plan
 
-1. Spike secure storage across macOS, Windows, and Linux fallback behavior.
+1. Spike secure storage on a **packaged** build (not just `dev`) across macOS,
+   Windows, and the Linux fallback, comparing keychain access in the Rust/Tauri
+   layer versus the Node sidecar (see Implementation Review → Open Decisions #2).
+   Pick the placement before step 2.
 2. Finalize the credential-store implementation choice based on the spike.
 3. Implement metadata-only config and migration.
 4. Implement certificate import/delete.
