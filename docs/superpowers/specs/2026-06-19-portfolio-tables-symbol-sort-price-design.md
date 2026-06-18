@@ -24,6 +24,7 @@ Status: Approved design, pending implementation plan
 - 不改券商登入、憑證或 API onboarding 流程。
 - 不重新設計帳務 Account 的版面；帳務本次維持卡片/摘要。
 - 不改券商後端回傳格式，除非實作時發現需要補非常小的型別欄位。
+- 不在本 PR3 補齊各券商 `trades()` 查回委託的委託時間標準化；這會列為後端後續工作。
 - 不新增進階篩選、欄位自訂、匯出 CSV 或多表格群組功能。
 
 ## User Decisions
@@ -31,7 +32,7 @@ Status: Approved design, pending implementation plan
 - 商品顯示採用共用 `SymbolCell` 方向，讓自選清單和持倉/委託表格共用代碼、中文簡稱、標記顯示。
 - 排序範圍：持倉與委託表格；帳務摘要先不改。
 - 排序狀態：每個表格各自記住欄位與升降冪，關掉 app 後仍保留。
-- 預設排序：持倉第一次打開維持穩定原順序；委託第一次打開用時間新到舊。
+- 預設排序：持倉第一次打開維持穩定原順序；委託第一次打開用時間新到舊。委託缺少可靠時間時，沿用目前 UI 反轉券商回傳陣列後的順序，維持既有「新在上」近似行為。
 - 現價口徑：即時行情優先；沒有即時資料或非盤中時用行情 snapshot 的最近收盤價；再沒有才用券商回報價或參考價。
 - 現價呈現：價格旁顯示小標記，例如「即時」「收盤」「券商」「參考」，完整說明放在 tooltip。
 - 可排序欄位：
@@ -61,8 +62,8 @@ Status: Approved design, pending implementation plan
 - 商品代碼與可選商品類型。
 - 券商持倉回傳的 `last_price`。
 - contract cache 裡的 `reference` / `previous_close` 等合約資料。
-- 目前 quote stream 的 tick。
-- visible positions 批次取得的行情 snapshot close。
+- 由 `ensureContract` 觸發訂閱後進入 quote stream 的 tick。
+- 可見持倉批次取得的行情 snapshot close。
 
 輸出應是一個可顯示與可計算的結構：
 
@@ -85,7 +86,7 @@ interface DisplayPrice {
 4. 合約參考價或可用的 previous close。
 5. 無資料。
 
-「有效即時 tick」指 app 目前 quote stream 中可用、價格大於 0 的 tick。非盤中開啟 app 時通常不會先收到即時 tick，因此會落到 snapshot close 並標示「收盤」。若 app 在盤中開啟後持續到收盤，最後一筆 tick 與 snapshot close 數值通常一致；實作必須避免用已知過期或價格為 0 的 tick 覆蓋收盤價。
+「有效即時 tick」指 app 目前 quote stream 中可用、價格大於 0 的 tick。持倉商品的 quote stream 由 `ensureContract` 的既有副作用觸發；`fetchSnapshots` 僅作為盤後、尚未收到 tick、或 tick 不可用時的兜底。非盤中開啟 app 時通常不會先收到即時 tick，因此會落到 snapshot close 並標示「收盤」。若 app 在盤中開啟後持續到收盤，最後一筆 tick 與 snapshot close 數值通常一致；實作必須避免用已知過期或價格為 0 的 tick 覆蓋收盤價。
 
 表格顯示價格時，顯示 `fmtPrice(value)` 與來源小標記。若沒有可用價格，顯示 `--` 與「無資料」提示。
 
@@ -104,8 +105,10 @@ interface SortState<Key extends string> {
 
 排序狀態需依表格分開持久化，例如：
 
-- `kauIkPro.positions.sort`
-- `kauIkPro.orders.sort`
+- `kau-ik-pro-positions-sort`
+- `kau-ik-pro-orders-sort`
+
+新 key 使用 kebab-case，對齊既有 `sj-pro-*` localStorage 風格。不要更動既有 `nova-pro-v1` watchlist 相容名稱。
 
 持倉預設排序：
 
@@ -115,7 +118,10 @@ interface SortState<Key extends string> {
 委託預設排序：
 
 - 時間新到舊。
-- 以 `Trade.status.order_ts` 作為主要時間欄位；個別資料沒有 `order_ts` 時，以原始陣列順序作為 fallback。
+- 以 `Trade.status.order_ts` 作為主要時間欄位。
+- 若兩筆資料都有 `order_ts`，依 timestamp 新到舊排序。
+- 若任一筆缺少 `order_ts`，使用目前 UI 的 fallback 語意：沿用 `trades` 原始陣列反轉後的相對順序，而不是原始陣列順序。這可避免富邦、app 重啟後查回、或外部下單資料缺時間時與現況顛倒。
+- 已知限制：在各券商 `trades()` 查回都補齊券商委託時間前，「時間新到舊」對富邦、app 重啟後舊委託、外部下單情境不保證精確，只能用券商回傳陣列順序近似。
 
 排序必須穩定：
 
@@ -143,14 +149,15 @@ interface SortState<Key extends string> {
 帳務摘要：
 
 - UI 維持卡片。
-- 總市值與今日未實現損益使用同一套 `DisplayPrice` 的 value。
-- 若某持倉價格無資料，該持倉不得以 `0` 直接拉低總市值；該筆應排除在市值與今日未實現計算之外，並讓 tooltip 說明有部位因缺少價格未納入。
+- 總市值與今日未實現損益一律使用同一套 `DisplayPrice` resolver。
+- 當券商 `last_price = 0` 時，resolver 應優先以 snapshot close 或參考價補價並計入計算，避免維持現況低估市值。
+- 僅在所有來源都沒有有效價格時，該持倉才排除在市值與今日未實現計算之外，並讓 tooltip 說明有幾筆部位因缺少價格未納入。
 
 ## Error Handling And Edge Cases
 
 - 中文名查詢失敗：顯示代碼，不顯示錯誤 toast。
 - 行情資料缺失：顯示券商價或參考價來源標記；都沒有則顯示 `--`。
-- 富邦股票 `last_price = 0`：不得顯示為有效現價；應繼續尋找 snapshot close 或參考價。
+- 富邦股票 `last_price = 0`：不得顯示為有效現價；應繼續尋找 snapshot close 或參考價，並在找到 fallback 價格時納入帳務計算。
 - 非盤中：即時 tick 不存在或過期時，使用最近收盤價並標示「收盤」。
 - 排序偏好讀取失敗：回到預設排序，不阻塞表格。
 - 商品資料晚到：表格可先顯示代碼，中文名補上時不應破壞使用者目前排序。
@@ -170,6 +177,7 @@ interface SortState<Key extends string> {
   - 持倉可依商品、方向、數量、成本、現價、損益排序。
   - 委託可依商品、買賣、價格、數量、狀態、時間排序。
   - 空值排最後，同值保留原始順序。
+  - 委託缺少 `order_ts` 時，時間排序 fallback 必須維持現況反轉順序。
   - 排序偏好可保存與讀回。
 
 ### Integration / UI Checks
@@ -177,11 +185,14 @@ interface SortState<Key extends string> {
 - 自選清單顯示不退化，仍有代碼、中文名、注意/處置/試算標記。
 - 持倉表能看到中文名、現價來源標記，且點欄位標題會切換排序方向。
 - 委託表能看到中文名，預設新委託在上方，且排序狀態可記住。
-- 帳務總市值不因券商持倉現價為 0 而被錯算成 0。
+- 帳務總市值在券商持倉現價為 0 時，會先用 snapshot close 或參考價補價並納入；只有所有來源缺價時才排除並提示。
 
 ## Implementation Constraints
 
 - 持倉現價解析必須為可見持倉批次取得 snapshot，不可每列各自發 API；優先使用既有 `fetchSnapshots`，並以 resolved contracts 作為輸入。
 - snapshot cache 應跟隨可見持倉集合更新，避免持倉變動後仍顯示舊商品價格。
-- 委託「時間」排序以 `Trade.status.order_ts` 為主；個別 row 缺值時 fallback 到原始順序，不阻塞排序。
+- 即時現價來源是 `ensureContract` 觸發的 quote stream tick；snapshot 是非盤中、尚未收到 tick、或 tick 無效時的 fallback。
+- 持倉 quote 訂閱應以去重後的商品代碼集合處理，避免同一商品因多列或重複 render 被重複訂閱；implementation plan 需評估大量持倉逐 code 訂閱的成本上限。
+- 委託「時間」排序以 `Trade.status.order_ts` 為主；個別 row 缺值時 fallback 到目前 UI 的反轉陣列順序，不阻塞排序。
+- 後續 backend 工作項：各券商 `trades()` 查回時應補入券商回報的委託時間，並補齊富邦 provider；補齊前 UI 需把缺時間情境視為近似排序。
 - 若合約型別未知，沿用目前 `ensureContract(code)` 的 STK first、FUT fallback 策略。
