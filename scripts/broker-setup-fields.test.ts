@@ -88,13 +88,13 @@ test('nova validation requires cert path and cert password', () => {
     });
 });
 
-test('brokerSetupSummary for esun excludes secret fields', () => {
+test('brokerSetupSummary for esun excludes credential fields', () => {
     const summary = brokerSetupSummary('esun', filled());
 
     assert.deepEqual(summary, {
         brokerLabel: '玉山',
         accountLabel: '證券帳號',
-        accountValue: 'A123456789',
+        accountValue: '已填寫',
         certificatePath: '/private/certs/fubon.p12',
         certificateFileName: 'fubon.p12',
         apiUrl: '',
@@ -105,6 +105,7 @@ test('brokerSetupSummary for esun excludes secret fields', () => {
     assert.equal(json.includes('api-key'), false);
     assert.equal(json.includes('api-secret'), false);
     assert.equal(json.includes('cert-pass'), false);
+    assert.equal(json.includes('A123456789'), false);
 });
 
 test('emptyBrokerSetupForm returns all setup keys with empty strings', () => {

@@ -94,7 +94,7 @@ export function brokerSetupSummary(broker: BrokerName, form: BrokerSetupForm) {
     return {
         brokerLabel: BROKER_LABEL[broker],
         accountLabel: BROKER_ACCOUNT_LABEL[broker],
-        accountValue: value(form.idNo),
+        accountValue: value(form.idNo) ? '已填寫' : '未填寫',
         certificatePath,
         certificateFileName: certificatePath.split(/[\\/]/).pop() ?? '',
         apiUrl: value(form.apiUrl),

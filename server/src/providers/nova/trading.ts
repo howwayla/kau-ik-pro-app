@@ -34,6 +34,7 @@ import type {
     Trade,
 } from '../../types/dto.ts';
 import type { Config } from '../../config.ts';
+import { brokerLoginSuccessMessage } from '../logging.ts';
 import type { ContractKey, MarketClientSource } from '../market-data.ts';
 import {
     FuturesNotSupportedError,
@@ -161,9 +162,7 @@ export class NovaTradingProvider implements TradingProvider {
             console.warn(`nova: websocket disconnected: ${msg}`);
         });
         this.sdk.connectWebsocket();
-        console.log(
-            `nova: 登入成功 ${account.branchName ?? ''}-${account.account}`,
-        );
+        console.log(brokerLoginSuccessMessage('nova', ['證券']));
     }
 
     private emit(ev: OrderEventData): void {
