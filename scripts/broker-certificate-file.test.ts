@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+    chooseCertificateFile,
     chooseCertificateFileWithOpen,
     normalizeCertificateSelection,
 } from '../src/lib/broker-certificate-file.ts';
@@ -44,4 +45,8 @@ test('chooseCertificateFileWithOpen opens a certificate-only dialog', async () =
             ],
         },
     ]);
+});
+
+test('chooseCertificateFile returns null outside Tauri', async () => {
+    assert.equal(await chooseCertificateFile(), null);
 });
