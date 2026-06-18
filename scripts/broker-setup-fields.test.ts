@@ -41,6 +41,15 @@ test('fieldsForBroker returns esun setup fields in order', () => {
     );
 });
 
+test('fieldsForBroker only returns text or password field types', () => {
+    const brokers = ['fubon', 'nova', 'esun'] as const;
+    const fieldTypes = brokers.flatMap((broker) =>
+        fieldsForBroker(broker).map((field) => field.type),
+    );
+
+    assert.deepEqual([...new Set(fieldTypes)].sort(), ['password', 'text']);
+});
+
 test('fubon validation accepts password-only credentials', () => {
     const form = { ...filled(), apiKey: '', apiSecret: '' };
 

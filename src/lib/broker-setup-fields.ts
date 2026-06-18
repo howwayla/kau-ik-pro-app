@@ -8,7 +8,7 @@ export type BrokerSetupFieldKey = keyof BrokerSetupForm;
 export interface BrokerSetupField {
     key: BrokerSetupFieldKey;
     label: string;
-    type: 'text' | 'password' | 'file' | 'url';
+    type: 'text' | 'password';
     placeholder: string;
     required: boolean;
     advanced?: boolean;
@@ -143,7 +143,7 @@ function fieldForKey(
             return {
                 key,
                 label: '憑證檔',
-                type: 'file',
+                type: 'text',
                 placeholder: '請選擇憑證檔',
                 required: true,
             };
@@ -159,7 +159,7 @@ function fieldForKey(
             return {
                 key,
                 label: 'API URL',
-                type: 'url',
+                type: 'text',
                 placeholder: '可選填 API URL',
                 required: false,
                 advanced: true,
