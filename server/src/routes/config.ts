@@ -88,6 +88,7 @@ export function registerConfigRoutes(
         const metadata = ctx.runtimeConfig.get().brokerMetadata;
         return {
             provider: ctx.trading.name(),
+            default_broker: ctx.runtimeConfig.get().defaultTradeBroker,
             creds: {
                 fubon: {
                     env: Boolean(envBrokerCreds('fubon')),
@@ -108,6 +109,21 @@ export function registerConfigRoutes(
                 esun: publicBrokerMetadata(metadata.esun),
             },
         };
+    });
+
+    app.post<{
+        Body: {
+            provider?: 'fubon' | 'nova' | 'esun' | null;
+        };
+    }>('/api/v1/config/trade/default', async (req, reply) => {
+        const name = req.body?.provider ?? null;
+        if (name !== null && !['fubon', 'nova', 'esun'].includes(name)) {
+            return reply
+                .code(400)
+                .send({ detail: 'provider 需為 fubon | nova | esun | null' });
+        }
+        ctx.runtimeConfig.set({ defaultTradeBroker: name });
+        return { default_broker: name };
     });
 
     app.post<{

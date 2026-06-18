@@ -80,6 +80,7 @@ export type TradeProviderName = 'mock' | 'fubon' | 'nova' | 'esun';
 
 export interface TradeConfig {
     provider: TradeProviderName;
+    default_broker: Exclude<TradeProviderName, 'mock'> | null;
     creds: Record<
         'fubon' | 'nova' | 'esun',
         { env: boolean; saved: boolean }
@@ -92,6 +93,15 @@ export interface TradeConfig {
 
 export function fetchTradeConfig() {
     return apiGet<TradeConfig>('/api/v1/config/trade');
+}
+
+export function setDefaultTradeBroker(
+    provider: Exclude<TradeProviderName, 'mock'> | null,
+) {
+    return apiPost<{ default_broker: Exclude<TradeProviderName, 'mock'> | null }>(
+        '/api/v1/config/trade/default',
+        { provider },
+    );
 }
 
 /** log in to a broker (or back to mock) and hot-swap trading + market */

@@ -16,6 +16,7 @@ export interface RuntimeConfig {
     marketProvider: 'mock' | 'fugle';
     fugleApiKey: string;
     tradeProvider: TradeProviderName;
+    defaultTradeBroker: BrokerKey | null;
     /** non-secret broker setup metadata persisted to config.json */
     brokerMetadata: Partial<Record<BrokerKey, BrokerMetadata>>;
     /** legacy/plaintext credentials kept in memory only for migration */
@@ -42,6 +43,12 @@ export class RuntimeConfigStore {
                 (envSeed.marketProvider === 'fugle' ? 'fugle' : 'mock'),
             fugleApiKey: loaded.fugleApiKey ?? envSeed.fugleApiKey ?? '',
             tradeProvider: loaded.tradeProvider ?? 'mock',
+            defaultTradeBroker:
+                loaded.defaultTradeBroker === 'fubon' ||
+                loaded.defaultTradeBroker === 'nova' ||
+                loaded.defaultTradeBroker === 'esun'
+                    ? loaded.defaultTradeBroker
+                    : null,
             brokerMetadata:
                 loaded.brokerMetadata ?? deriveBrokerMetadata(legacyCreds),
             brokerCreds: legacyCreds,
@@ -86,6 +93,7 @@ function persistedConfig(config: RuntimeConfig) {
         marketProvider: config.marketProvider,
         fugleApiKey: config.fugleApiKey,
         tradeProvider: config.tradeProvider,
+        defaultTradeBroker: config.defaultTradeBroker,
         brokerMetadata: config.brokerMetadata,
     };
 }

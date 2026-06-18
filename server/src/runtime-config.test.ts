@@ -86,5 +86,27 @@ await check('defaults tradeProvider to mock when not explicitly persisted', () =
     assert.equal(store.get().tradeProvider, 'mock');
 });
 
+await check('persists defaultTradeBroker without broker secrets', () => {
+    const filePath = tempConfigPath();
+    const store = new RuntimeConfigStore(filePath);
+
+    store.set({
+        defaultTradeBroker: 'nova',
+        brokerCreds: { fubon: fubonCreds },
+    });
+
+    const persisted = JSON.parse(readFileSync(filePath, 'utf8'));
+
+    assert.equal(persisted.defaultTradeBroker, 'nova');
+    assert.equal(Object.hasOwn(persisted, 'brokerCreds'), false);
+    assert.equal(JSON.stringify(persisted).includes('account-pass'), false);
+});
+
+await check('defaults defaultTradeBroker to null', () => {
+    const store = new RuntimeConfigStore(tempConfigPath());
+
+    assert.equal(store.get().defaultTradeBroker, null);
+});
+
 console.log(`\n${failures === 0 ? 'ALL GREEN' : failures + ' FAILING'}`);
 process.exit(failures === 0 ? 0 : 1);

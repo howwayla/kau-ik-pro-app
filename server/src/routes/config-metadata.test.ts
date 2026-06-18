@@ -106,5 +106,52 @@ await check('GET /api/v1/config/trade exposes metadata without secrets', async (
     assert.equal(JSON.stringify(body).includes('cert_pass'), false);
 });
 
+await check('GET /api/v1/config/trade exposes default broker preference', async () => {
+    const runtimeConfig = new RuntimeConfigStore(tempConfigPath());
+    runtimeConfig.set({ defaultTradeBroker: 'esun' });
+    const app = buildTestApp(runtimeConfig);
+
+    const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/config/trade',
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().default_broker, 'esun');
+});
+
+await check('POST /api/v1/config/trade/default persists default broker preference', async () => {
+    const filePath = tempConfigPath();
+    const runtimeConfig = new RuntimeConfigStore(filePath);
+    const app = buildTestApp(runtimeConfig);
+
+    const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/config/trade/default',
+        payload: { provider: 'fubon' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(runtimeConfig.get().defaultTradeBroker, 'fubon');
+    const persistedText = readFileSync(filePath, 'utf8');
+    assert.ok(persistedText.includes('defaultTradeBroker'));
+    assert.equal(persistedText.includes('password'), false);
+});
+
+await check('POST /api/v1/config/trade/default clears default broker preference', async () => {
+    const runtimeConfig = new RuntimeConfigStore(tempConfigPath());
+    runtimeConfig.set({ defaultTradeBroker: 'fubon' });
+    const app = buildTestApp(runtimeConfig);
+
+    const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/config/trade/default',
+        payload: { provider: null },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(runtimeConfig.get().defaultTradeBroker, null);
+});
+
 console.log(`\n${failures === 0 ? 'ALL GREEN' : failures + ' FAILING'}`);
 process.exit(failures === 0 ? 0 : 1);
