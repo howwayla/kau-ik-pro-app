@@ -15,7 +15,6 @@ export const overlay = style({
 export const dialog = style({
     width: 'min(36rem, 100%)',
     maxHeight: 'min(42rem, calc(100vh - 2rem))',
-    minHeight: '31rem',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',

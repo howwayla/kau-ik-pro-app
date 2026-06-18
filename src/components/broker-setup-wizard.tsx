@@ -12,6 +12,7 @@ import {
 import {
     deleteBrokerSecrets,
     saveBrokerSecrets,
+    statusBrokerSecrets,
 } from '../lib/broker-secret-store';
 import { chooseCertificateFile } from '../lib/broker-certificate-file';
 import { isTauri } from '../lib/runtime';
@@ -35,6 +36,7 @@ export interface BrokerSetupWizardProps {
 
 const BROKER_CHOICES: BrokerName[] = ['fubon', 'nova', 'esun'];
 const STEP_LABELS = ['選券商', '填寫登入資訊', '檢查並登入'] as const;
+const TITLE_ID = 'broker-setup-wizard-title';
 
 export function BrokerSetupWizard({
     open,
@@ -106,6 +108,11 @@ export function BrokerSetupWizard({
         }
     };
 
+    const reloadAfterWarning = (warning: string) => {
+        setSubmitError(`${warning}（5 秒後重新整理）`);
+        setTimeout(() => window.location.reload(), 5000);
+    };
+
     const submit = async () => {
         if (!broker || busy) return;
 
@@ -119,7 +126,7 @@ export function BrokerSetupWizard({
         setBusy(true);
         setSubmitError('');
 
-        let savedSecrets = false;
+        let liveSwitchSucceeded = false;
 
         try {
             const result = await setTradeSource({
@@ -133,8 +140,13 @@ export function BrokerSetupWizard({
                 api_url: form.apiUrl,
                 persist_metadata: isTauri ? false : undefined,
             });
+            liveSwitchSucceeded = true;
 
             if (isTauri) {
+                const existingSecrets = await statusBrokerSecrets(broker).catch(
+                    () => null,
+                );
+                let savedSecrets = false;
                 try {
                     await saveBrokerSecrets(broker, form);
                     savedSecrets = true;
@@ -142,34 +154,54 @@ export function BrokerSetupWizard({
                         brokerMetadataFromSetupForm(broker, form),
                     );
                 } catch (storageError) {
-                    if (savedSecrets) {
+                    if (savedSecrets && existingSecrets?.present === false) {
                         await deleteBrokerSecrets(broker).catch(() => null);
                     }
                     throw storageError;
                 }
             }
 
+            const warnings: string[] = [];
+            if (result.warning) warnings.push(result.warning);
+
             if (makeDefault) {
-                await setDefaultTradeBroker(broker);
+                try {
+                    await setDefaultTradeBroker(broker);
+                } catch (defaultError) {
+                    const message =
+                        defaultError instanceof Error
+                            ? defaultError.message
+                            : String(defaultError);
+                    warnings.push(
+                        `登入完成，但預設券商偏好未儲存：${message}`,
+                    );
+                }
             }
 
-            if (result.warning) {
-                setSubmitError(`${result.warning}（5 秒後重新整理）`);
-                setTimeout(() => window.location.reload(), 5000);
+            if (warnings.length > 0) {
+                reloadAfterWarning(warnings.join('；'));
                 return;
             }
 
             window.location.reload();
         } catch (e) {
-            await setTradeSource({ provider: 'mock' }).catch(() => null);
+            if (liveSwitchSucceeded) {
+                await setTradeSource({ provider: 'mock' }).catch(() => null);
+            }
             setSubmitError(e instanceof Error ? e.message : String(e));
             setBusy(false);
         }
     };
 
     return (
-        <div className={styles.overlay} onClick={onClose}>
+        <div
+            className={styles.overlay}
+            onClick={() => {
+                if (!busy) onClose();
+            }}
+        >
             <div
+                aria-labelledby={TITLE_ID}
                 aria-modal='true'
                 className={styles.dialog}
                 role='dialog'
@@ -177,7 +209,9 @@ export function BrokerSetupWizard({
             >
                 <div className={styles.header}>
                     <div>
-                        <div className={styles.title}>券商登入設定</div>
+                        <div className={styles.title} id={TITLE_ID}>
+                            券商登入設定
+                        </div>
                         <div className={styles.steps}>
                             {STEP_LABELS.map((label, index) => (
                                 <span
@@ -196,6 +230,7 @@ export function BrokerSetupWizard({
                     <button
                         aria-label='關閉券商登入設定'
                         className={styles.closeButton}
+                        disabled={busy}
                         type='button'
                         onClick={onClose}
                     >
