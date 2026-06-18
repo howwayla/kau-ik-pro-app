@@ -36,11 +36,22 @@ export function resolveServerDataDir(
 
     const metaUrl = options.metaUrl ?? import.meta.url;
     const platform = options.platform ?? process.platform;
-    const here = dirname(fileURLToPath(metaUrl));
-
-    if (here === '/$bunfs' || here.startsWith('/$bunfs/')) {
+    if (isBunfsMetaUrl(metaUrl)) {
         return packagedDataDir(env, platform);
     }
 
+    const here = dirname(fileURLToPath(metaUrl));
     return join(here, '..', 'data');
+}
+
+function isBunfsMetaUrl(metaUrl: string): boolean {
+    try {
+        const { protocol, pathname } = new URL(metaUrl);
+        return (
+            protocol === 'file:' &&
+            (pathname === '/$bunfs' || pathname.startsWith('/$bunfs/'))
+        );
+    } catch {
+        return false;
+    }
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { resolveServerDataDir } from './data-dir.ts';
 
 let failures = 0;
@@ -14,37 +15,50 @@ async function check(name: string, fn: () => Promise<void> | void) {
     }
 }
 
+const bunfsMetaUrl = 'file:///$bunfs/root/nova-server-aarch64-apple-darwin';
+
 await check('uses KAUIK_DATA_DIR when the server is running from a bun compiled sidecar', () => {
+    const dataDir = resolve('tmp/kauik-data');
+
     assert.equal(
         resolveServerDataDir({
-            env: { KAUIK_DATA_DIR: '/Users/me/Library/Application Support/Kau-ik Pro' },
-            metaUrl: 'file:///$bunfs/root/nova-server-aarch64-apple-darwin',
-            cwd: '/Applications/Kau-ik Pro.app/Contents/MacOS',
+            env: { KAUIK_DATA_DIR: dataDir },
+            metaUrl: bunfsMetaUrl,
+            cwd: resolve('Applications/Kau-ik Pro.app/Contents/MacOS'),
         }),
-        '/Users/me/Library/Application Support/Kau-ik Pro',
+        dataDir,
     );
 });
 
 await check('uses macOS Application Support when a packaged bun sidecar has no data dir env', () => {
+    const home = resolve('Users/me');
+
     assert.equal(
         resolveServerDataDir({
-            env: { HOME: '/Users/me' },
-            metaUrl: 'file:///$bunfs/root/nova-server-aarch64-apple-darwin',
-            cwd: '/',
+            env: { HOME: home },
+            metaUrl: bunfsMetaUrl,
+            cwd: resolve('/'),
             platform: 'darwin',
         }),
-        '/Users/me/Library/Application Support/io.github.howwayla.kauikpro',
+        join(
+            home,
+            'Library',
+            'Application Support',
+            'io.github.howwayla.kauikpro',
+        ),
     );
 });
 
 await check('keeps the source checkout server/data path for tsx development', () => {
+    const serverIndex = resolve('repo/server/src/index.ts');
+
     assert.equal(
         resolveServerDataDir({
             env: {},
-            metaUrl: 'file:///repo/server/src/index.ts',
-            cwd: '/repo',
+            metaUrl: pathToFileURL(serverIndex).href,
+            cwd: resolve('repo'),
         }),
-        resolve('/repo/server/data'),
+        resolve('repo/server/data'),
     );
 });
 
