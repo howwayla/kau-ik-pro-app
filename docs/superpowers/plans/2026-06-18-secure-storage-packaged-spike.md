@@ -57,7 +57,7 @@ Success means:
 - Modify: `src-tauri/Cargo.toml`
 - Modify: `src-tauri/src/lib.rs`
 
-- [ ] **Step 1: Add the target-specific dependency**
+- [x] **Step 1: Add the target-specific dependency**
 
 Add these dependency sections to `src-tauri/Cargo.toml` below the existing
 `[dependencies]` block:
@@ -73,7 +73,7 @@ keyring = { version = "=3.6.3", default-features = false, features = ["windows-n
 keyring = { version = "=3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 ```
 
-- [ ] **Step 2: Run Cargo check to lock dependencies**
+- [x] **Step 2: Run Cargo check to lock dependencies**
 
 Run:
 
@@ -83,7 +83,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 Expected: dependency resolution succeeds and `src-tauri/Cargo.lock` updates.
 
-- [ ] **Step 3: Add hardcoded spike commands**
+- [x] **Step 3: Add hardcoded spike commands**
 
 In `src-tauri/src/lib.rs`, add:
 
@@ -171,7 +171,7 @@ Register them in the Tauri builder:
 ])
 ```
 
-- [ ] **Step 4: Run Cargo check**
+- [x] **Step 4: Run Cargo check**
 
 Run:
 
@@ -182,7 +182,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 Expected: Rust compiles. If permission generation fails, add the minimal Tauri
 permission/capability files for these commands and rerun.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/lib.rs src-tauri/permissions src-tauri/capabilities
@@ -195,7 +195,7 @@ git commit -m "spike: add tauri secure storage commands"
 - Create: `src/lib/secure-storage-spike.ts`
 - Modify: `src/components/hud-header.tsx`
 
-- [ ] **Step 1: Create the Tauri invoke wrapper**
+- [x] **Step 1: Create the Tauri invoke wrapper**
 
 Create `src/lib/secure-storage-spike.ts`:
 
@@ -236,7 +236,7 @@ export async function runSecureStorageSpike(): Promise<SecureStorageSpikeResult>
 }
 ```
 
-- [ ] **Step 2: Add a temporary desktop-only UI trigger**
+- [x] **Step 2: Add a temporary desktop-only UI trigger**
 
 In `src/components/hud-header.tsx`, add a small button inside a non-ordering
 menu (for example the Broker menu footer) that calls `runSecureStorageSpike()`
@@ -253,7 +253,7 @@ const [secureStorageSpike, setSecureStorageSpike] =
 
 Do not display any secret value. Do not wire this to real broker credentials.
 
-- [ ] **Step 3: Run frontend typecheck/build**
+- [x] **Step 3: Run frontend typecheck/build**
 
 Run:
 
@@ -263,7 +263,7 @@ pnpm build
 
 Expected: TypeScript and Vite build pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add src/lib/secure-storage-spike.ts src/components/hud-header.tsx
@@ -275,7 +275,7 @@ git commit -m "spike: add secure storage check UI"
 **Files:**
 - Create: `docs/superpowers/spikes/2026-06-18-secure-storage-packaged-result.md`
 
-- [ ] **Step 1: Build packaged app**
+- [x] **Step 1: Build packaged app**
 
 Run:
 
@@ -287,7 +287,7 @@ pnpm desktop:build
 Expected: `.app` and `.dmg` are produced under
 `src-tauri/target/release/bundle/`.
 
-- [ ] **Step 2: Launch packaged app and trigger the spike**
+- [x] **Step 2: Launch packaged app or packaged binary and trigger the spike**
 
 Open:
 
@@ -297,13 +297,18 @@ src-tauri/target/release/bundle/macos/Kau-ik Pro.app
 
 Click "Run secure-storage check".
 
-Expected UI status:
+For non-UI verification, run the packaged binary with:
 
-```text
-write=true read=true delete=true missing=true
+```sh
+"src-tauri/target/release/bundle/macos/Kau-ik Pro.app/Contents/MacOS/kau-ik-pro-app" --secure-storage-spike write
+"src-tauri/target/release/bundle/macos/Kau-ik Pro.app/Contents/MacOS/kau-ik-pro-app" --secure-storage-spike read
+"src-tauri/target/release/bundle/macos/Kau-ik Pro.app/Contents/MacOS/kau-ik-pro-app" --secure-storage-spike delete
 ```
 
-- [ ] **Step 3: Verify Keychain without printing the secret**
+Expected status: write succeeds, read returns `valueMatches=true`, and delete
+removes the test item.
+
+- [x] **Step 3: Verify Keychain without printing the secret**
 
 After a write-only or repeatable write/read run, verify presence without `-w`:
 
@@ -324,7 +329,7 @@ security find-generic-password \
 Expected: presence can be observed after write; absence can be observed after
 delete. Never print the password.
 
-- [ ] **Step 4: Record results**
+- [x] **Step 4: Record results**
 
 Create `docs/superpowers/spikes/2026-06-18-secure-storage-packaged-result.md`
 with:
@@ -350,7 +355,8 @@ native-addon packaging under `bun --compile`; keep it as fallback/research only.
 ## Packaged Verification
 
 - Packaged app launched from `src-tauri/target/release/bundle/macos/Kau-ik Pro.app`.
-- Spike UI result: `write=true read=true delete=true missing=true`.
+- Packaged binary result: write succeeds, read returns `valueMatches=true`, and
+  delete succeeds.
 - macOS Keychain presence check after write: `present`.
 - macOS Keychain absence check after delete: `absent`.
 
@@ -361,7 +367,7 @@ native-addon packaging under `bun --compile`; keep it as fallback/research only.
 - Linux fallback remains future implementation work.
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add docs/superpowers/spikes/2026-06-18-secure-storage-packaged-result.md
@@ -373,7 +379,7 @@ git commit -m "docs: record secure storage packaged spike"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-06-17-broker-login-ux-design.md`
 
-- [ ] **Step 1: Update decision status**
+- [x] **Step 1: Update decision status**
 
 Change "Where secure storage lives — pending spike" to:
 
@@ -384,7 +390,7 @@ Change "Where secure storage lives — pending spike" to:
    because it depends on native-addon packaging under `bun --compile`.
 ```
 
-- [ ] **Step 2: Update Secure Storage Abstraction note**
+- [x] **Step 2: Update Secure Storage Abstraction note**
 
 Make the review note say:
 
@@ -393,7 +399,7 @@ The sidecar-facing interface still exists, but its implementation must call the
 Rust/Tauri secure-storage bridge rather than a native Node keychain module.
 ```
 
-- [ ] **Step 3: Run docs check**
+- [x] **Step 3: Run docs check**
 
 Run:
 
@@ -403,7 +409,7 @@ rg -n "pending spike|Open Decisions|resolve first|TBD|TODO" docs/superpowers/spe
 
 Expected: no output.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add docs/superpowers/specs/2026-06-17-broker-login-ux-design.md

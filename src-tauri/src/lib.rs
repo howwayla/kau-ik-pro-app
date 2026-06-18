@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{
@@ -12,6 +13,117 @@ use tauri_plugin_shell::{
 
 // Holds the spawned Node server sidecar so it can be killed on app exit.
 struct NovaServer(Mutex<Option<CommandChild>>);
+
+const SECURE_STORAGE_SPIKE_SERVICE: &str = "io.github.howwayla.kauikpro.secure-storage-spike";
+const SECURE_STORAGE_SPIKE_ACCOUNT: &str = "roundtrip-test";
+const SECURE_STORAGE_SPIKE_VALUE: &str = "kau-ik-pro-spike-value-v1";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureStorageSpikeResult {
+    ok: bool,
+    present: bool,
+    value_matches: Option<bool>,
+    error: Option<String>,
+}
+
+impl SecureStorageSpikeResult {
+    fn ok(present: bool, value_matches: Option<bool>) -> Self {
+        Self {
+            ok: true,
+            present,
+            value_matches,
+            error: None,
+        }
+    }
+
+    fn error(err: keyring::Error) -> Self {
+        Self {
+            ok: false,
+            present: false,
+            value_matches: None,
+            error: Some(err.to_string()),
+        }
+    }
+}
+
+fn secure_storage_spike_entry() -> Result<keyring::Entry, keyring::Error> {
+    keyring::Entry::new(SECURE_STORAGE_SPIKE_SERVICE, SECURE_STORAGE_SPIKE_ACCOUNT)
+}
+
+pub fn secure_storage_spike_write_result() -> SecureStorageSpikeResult {
+    let entry = match secure_storage_spike_entry() {
+        Ok(entry) => entry,
+        Err(err) => return SecureStorageSpikeResult::error(err),
+    };
+    match entry.set_password(SECURE_STORAGE_SPIKE_VALUE) {
+        Ok(()) => SecureStorageSpikeResult::ok(true, None),
+        Err(err) => SecureStorageSpikeResult::error(err),
+    }
+}
+
+pub fn secure_storage_spike_read_result() -> SecureStorageSpikeResult {
+    let entry = match secure_storage_spike_entry() {
+        Ok(entry) => entry,
+        Err(err) => return SecureStorageSpikeResult::error(err),
+    };
+    match entry.get_password() {
+        Ok(value) => SecureStorageSpikeResult::ok(true, Some(value == SECURE_STORAGE_SPIKE_VALUE)),
+        Err(keyring::Error::NoEntry) => SecureStorageSpikeResult::ok(false, Some(false)),
+        Err(err) => SecureStorageSpikeResult::error(err),
+    }
+}
+
+pub fn secure_storage_spike_delete_result() -> SecureStorageSpikeResult {
+    let entry = match secure_storage_spike_entry() {
+        Ok(entry) => entry,
+        Err(err) => return SecureStorageSpikeResult::error(err),
+    };
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => SecureStorageSpikeResult::ok(false, None),
+        Err(err) => SecureStorageSpikeResult::error(err),
+    }
+}
+
+pub fn run_secure_storage_spike_cli(action: &str) -> i32 {
+    let result = match action {
+        "write" => secure_storage_spike_write_result(),
+        "read" => secure_storage_spike_read_result(),
+        "delete" => secure_storage_spike_delete_result(),
+        _ => SecureStorageSpikeResult {
+            ok: false,
+            present: false,
+            value_matches: None,
+            error: Some("unsupported secure storage spike action".to_string()),
+        },
+    };
+
+    match serde_json::to_string(&result) {
+        Ok(json) => println!("{json}"),
+        Err(err) => eprintln!("failed to serialize secure storage spike result: {err}"),
+    }
+
+    if result.ok {
+        0
+    } else {
+        1
+    }
+}
+
+#[tauri::command]
+fn secure_storage_spike_write() -> SecureStorageSpikeResult {
+    secure_storage_spike_write_result()
+}
+
+#[tauri::command]
+fn secure_storage_spike_read() -> SecureStorageSpikeResult {
+    secure_storage_spike_read_result()
+}
+
+#[tauri::command]
+fn secure_storage_spike_delete() -> SecureStorageSpikeResult {
+    secure_storage_spike_delete_result()
+}
 
 fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
@@ -80,6 +192,11 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        .invoke_handler(tauri::generate_handler![
+            secure_storage_spike_write,
+            secure_storage_spike_read,
+            secure_storage_spike_delete
+        ])
         .setup(|app| {
             // ---- bundled Node server sidecar (auto-started; killed on exit) ----
             let data_dir = app.path().app_data_dir()?;
@@ -143,4 +260,19 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secure_storage_spike_uses_fixed_non_broker_identifiers() {
+        assert_eq!(
+            SECURE_STORAGE_SPIKE_SERVICE,
+            "io.github.howwayla.kauikpro.secure-storage-spike"
+        );
+        assert_eq!(SECURE_STORAGE_SPIKE_ACCOUNT, "roundtrip-test");
+        assert_eq!(SECURE_STORAGE_SPIKE_VALUE, "kau-ik-pro-spike-value-v1");
+    }
 }

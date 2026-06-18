@@ -21,6 +21,7 @@ import {
 import { setCapabilities } from '../lib/capabilities';
 import { useTriggerStatus } from '../lib/triggers';
 import { SENSITIVE, setPrivacy, usePrivacy } from '../lib/privacy';
+import { runSecureStorageSpike } from '../lib/secure-storage-spike';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
     setThemeSettings,
@@ -343,6 +344,11 @@ function BrokerMenu() {
     });
     const [busy, setBusy] = useState<TradeProviderName | null>(null);
     const [error, setError] = useState('');
+    const [storageCheck, setStorageCheck] = useState<{
+        busy: boolean;
+        ok: boolean | null;
+        message: string;
+    }>({ busy: false, ok: null, message: '' });
 
     useEffect(() => {
         fetchTradeConfig()
@@ -399,6 +405,25 @@ function BrokerMenu() {
         } else {
             setPending(provider);
             setError('');
+        }
+    };
+
+    const checkSecureStorage = async () => {
+        if (storageCheck.busy) return;
+        setStorageCheck({ busy: true, ok: null, message: '' });
+        try {
+            const res = await runSecureStorageSpike();
+            setStorageCheck({
+                busy: false,
+                ok: res.ok,
+                message: res.message,
+            });
+        } catch (e) {
+            setStorageCheck({
+                busy: false,
+                ok: false,
+                message: e instanceof Error ? e.message : String(e),
+            });
         }
     };
 
@@ -568,6 +593,27 @@ function BrokerMenu() {
                         切換到券商後：交易走券商 API、行情直接用券商行情
                         （免富果 Key）。每一筆委託都是真實交易。
                     </span>
+                    <span className={styles.settingLabel}>安全儲存診斷</span>
+                    <button
+                        className={styles.opt.off}
+                        disabled={storageCheck.busy}
+                        onClick={checkSecureStorage}
+                    >
+                        {storageCheck.busy
+                            ? '測試中…'
+                            : '測試系統安全儲存'}
+                    </button>
+                    {storageCheck.message && (
+                        <span
+                            className={`${styles.emptyHint} ${
+                                storageCheck.ok
+                                    ? panel.dirText.down
+                                    : panel.dirText.up
+                            }`}
+                        >
+                            {storageCheck.message}
+                        </span>
+                    )}
                 </>
             )}
         </Menu>

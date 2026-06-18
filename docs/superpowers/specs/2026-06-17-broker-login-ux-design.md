@@ -2,8 +2,8 @@
 
 Date: 2026-06-17
 Reviewed: 2026-06-18 — read "Implementation Review" before building. The target
-persona is now resolved; secure-storage placement remains pending a packaged
-spike comparing the Rust/Tauri layer with the Node/Bun sidecar.
+persona is now resolved; secure-storage placement is resolved in favor of the
+Rust/Tauri layer after a packaged macOS spike.
 
 ## Purpose
 
@@ -49,25 +49,12 @@ specific files); the genuinely new and hard part is OS secure storage.
    but the broker setup experience should not require environment variables,
    absolute paths, Keychain knowledge, or config-file editing.
 
-2. **Where secure storage lives — pending spike.** Rust/Tauri layer vs
-   Node/Bun sidecar must be compared on a packaged build before implementation.
-   This
-   spec places `BrokerSecretStore` in the Node sidecar (see "Secure Storage
-   Abstraction"). That is the riskiest placement:
-   - Node OS-keychain access almost always goes through `keytar`, which is
-     archived and effectively unmaintained (confirm current state during the
-     spike).
-   - The sidecar ships as a single `bun --compile` binary. The three commits
-     immediately before this spec on this branch were all fixing
-     bun-compiled-sidecar filesystem problems (`persist sidecar data outside
-     bunfs`, `use app data dir for packaged server`, `retry stale tauri cache
-     build`). Bundling a native Node addon into that binary is exactly the kind
-     of thing that runs under `dev` and breaks once packaged.
-   - Recommended default: do keychain access in the **Rust/Tauri layer**
-     (e.g. `keyring-rs`) and have the sidecar request assembled credentials over
-     the existing local HTTP boundary or a Tauri command. The spike (Rollout
-     step 1) must compare both placements on a *packaged* build, not just `dev`,
-     and then update this spec with the selected placement.
+2. **Where secure storage lives — resolved.** Use Rust/Tauri `keyring = 3.6.3`
+   as the PR1 primary secure-storage placement. The packaged macOS spike proved
+   write/read/delete against Keychain from the bundled app binary. Node/Bun
+   native keychain remains documented as technically plausible, but is rejected
+   as the primary architecture because it depends on native-addon packaging
+   under `bun --compile`.
 
 ### Already exists — do not rebuild
 
@@ -326,12 +313,10 @@ object is assembled from metadata plus secure storage at the boundary.
 This keeps provider code focused on broker SDK behavior and keeps storage
 decisions isolated.
 
-> **Review (2026-06-18):** The interface is the right shape, but its *placement*
-> is pending spike validation (see Implementation Review → Decision Status #2). If
-> keychain access ends up in the Rust/Tauri layer, this interface still lives in
-> the sidecar but its implementation calls out to Tauri rather than to a native
-> Node keychain module. Decide placement in the spike before writing the
-> implementation.
+> **Review (2026-06-18):** The interface is the right shape. Its implementation
+> must call the Rust/Tauri secure-storage bridge rather than a native Node
+> keychain module. Provider code should still receive assembled `BrokerCreds`
+> at the boundary and should not know how secrets are stored.
 
 ## Migration
 
@@ -399,11 +384,10 @@ Manual verification:
 
 ## Rollout Plan
 
-1. Spike secure storage on a **packaged** build (not just `dev`) across macOS,
-   Windows, and the Linux fallback, comparing keychain access in the Rust/Tauri
-   layer versus the Node sidecar (see Implementation Review → Decision Status #2).
-   Pick the placement before step 2.
-2. Finalize the credential-store implementation choice based on the spike.
+1. Extend the Rust/Tauri secure-storage bridge from the packaged spike into
+   broker-specific get/set/delete commands.
+2. Implement the sidecar-facing credential-store interface on top of that
+   bridge.
 3. Implement metadata-only config and migration.
 4. Implement certificate import/delete.
 5. Implement setup/login/logout/change/delete APIs.
