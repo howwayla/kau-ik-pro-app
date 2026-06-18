@@ -62,6 +62,71 @@ pub struct BrokerSecrets {
     cert_pass: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSecretMetadata {
+    cert_path: String,
+    api_url: String,
+}
+
+#[derive(Serialize)]
+struct BrokerSecretLoginRequest<'a> {
+    provider: &'a str,
+    id_no: &'a str,
+    password: &'a str,
+    api_key: &'a str,
+    api_secret: &'a str,
+    cert_path: &'a str,
+    cert_pass: &'a str,
+    api_url: &'a str,
+    persist_metadata: bool,
+}
+
+#[derive(Deserialize)]
+struct BrokerSecretLoginServerOk {
+    provider: String,
+    market: String,
+    warning: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BrokerSecretLoginServerError {
+    detail: Option<String>,
+    message: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSecretLoginResult {
+    ok: bool,
+    provider: Option<String>,
+    market: Option<String>,
+    warning: Option<String>,
+    error: Option<String>,
+}
+
+impl BrokerSecretLoginResult {
+    fn ok(result: BrokerSecretLoginServerOk) -> Self {
+        Self {
+            ok: true,
+            provider: Some(result.provider),
+            market: Some(result.market),
+            warning: result.warning,
+            error: None,
+        }
+    }
+
+    fn error(error: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            provider: None,
+            market: None,
+            warning: None,
+            error: Some(error.into()),
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrokerSecretCommandResult {
@@ -108,6 +173,24 @@ fn broker_secrets_to_json(secrets: &BrokerSecrets) -> Result<String, serde_json:
 
 fn broker_secrets_from_json(json: &str) -> Result<BrokerSecrets, serde_json::Error> {
     serde_json::from_str(json)
+}
+
+fn broker_secret_login_request<'a>(
+    broker: &'a str,
+    metadata: &'a BrokerSecretMetadata,
+    secrets: &'a BrokerSecrets,
+) -> BrokerSecretLoginRequest<'a> {
+    BrokerSecretLoginRequest {
+        provider: broker,
+        id_no: &secrets.id_no,
+        password: &secrets.password,
+        api_key: &secrets.api_key,
+        api_secret: &secrets.api_secret,
+        cert_path: &metadata.cert_path,
+        cert_pass: &secrets.cert_pass,
+        api_url: &metadata.api_url,
+        persist_metadata: false,
+    }
 }
 
 pub fn broker_secret_save_result(
@@ -159,6 +242,54 @@ pub fn broker_secret_delete_result(broker: &str) -> BrokerSecretCommandResult {
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => BrokerSecretCommandResult::ok(false),
         Err(err) => BrokerSecretCommandResult::error(err.to_string()),
+    }
+}
+
+pub async fn broker_secret_login_result(
+    broker: String,
+    metadata: BrokerSecretMetadata,
+) -> BrokerSecretLoginResult {
+    if let Err(err) = broker_secret_account(&broker) {
+        return BrokerSecretLoginResult::error(err);
+    }
+    if metadata.cert_path.trim().is_empty() {
+        return BrokerSecretLoginResult::error("缺少憑證路徑");
+    }
+    let secrets = match broker_secret_load_result(&broker) {
+        Ok(Some(secrets)) => secrets,
+        Ok(None) => {
+            return BrokerSecretLoginResult::error(
+                "尚未在系統安全儲存中找到這家券商的登入資訊",
+            );
+        }
+        Err(err) => return BrokerSecretLoginResult::error(err),
+    };
+    let request = broker_secret_login_request(&broker, &metadata, &secrets);
+    let response = match reqwest::Client::new()
+        .post("http://127.0.0.1:8080/api/v1/config/trade")
+        .json(&request)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => return BrokerSecretLoginResult::error(err.to_string()),
+    };
+    let status = response.status();
+    let text = match response.text().await {
+        Ok(text) => text,
+        Err(err) => return BrokerSecretLoginResult::error(err.to_string()),
+    };
+    if !status.is_success() {
+        let detail = serde_json::from_str::<BrokerSecretLoginServerError>(&text)
+            .ok()
+            .and_then(|body| body.detail.or(body.message))
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or_else(|| format!("本機服務回應 {status}"));
+        return BrokerSecretLoginResult::error(detail);
+    }
+    match serde_json::from_str::<BrokerSecretLoginServerOk>(&text) {
+        Ok(result) => BrokerSecretLoginResult::ok(result),
+        Err(err) => BrokerSecretLoginResult::error(err.to_string()),
     }
 }
 
@@ -251,6 +382,14 @@ fn broker_secret_delete(broker: String) -> BrokerSecretCommandResult {
     broker_secret_delete_result(&broker)
 }
 
+#[tauri::command]
+async fn broker_secret_login(
+    broker: String,
+    metadata: BrokerSecretMetadata,
+) -> BrokerSecretLoginResult {
+    broker_secret_login_result(broker, metadata).await
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
@@ -324,7 +463,8 @@ pub fn run() {
             secure_storage_spike_delete,
             broker_secret_save,
             broker_secret_status,
-            broker_secret_delete
+            broker_secret_delete,
+            broker_secret_login
         ])
         .setup(|app| {
             // ---- bundled Node server sidecar (auto-started; killed on exit) ----
@@ -430,5 +570,30 @@ mod tests {
         assert!(!json.contains("certPath"));
         assert!(!json.contains("apiUrl"));
         assert_eq!(broker_secrets_from_json(&json).unwrap(), secrets);
+    }
+
+    #[test]
+    fn broker_secret_login_request_uses_metadata_and_saved_secrets() {
+        let secrets = BrokerSecrets {
+            id_no: "A123456789".to_string(),
+            password: "account-pass".to_string(),
+            api_key: "api-key".to_string(),
+            api_secret: "api-secret".to_string(),
+            cert_pass: "cert-pass".to_string(),
+        };
+        let metadata = BrokerSecretMetadata {
+            cert_path: "/private/certs/nova.p12".to_string(),
+            api_url: "https://broker.example.test".to_string(),
+        };
+
+        let request = broker_secret_login_request("nova", &metadata, &secrets);
+        let json = serde_json::to_string(&request).unwrap();
+
+        assert!(json.contains("\"provider\":\"nova\""));
+        assert!(json.contains("\"id_no\":\"A123456789\""));
+        assert!(json.contains("\"cert_path\":\"/private/certs/nova.p12\""));
+        assert!(json.contains("\"persist_metadata\":false"));
+        assert!(!json.contains("certPath"));
+        assert!(!json.contains("certPass"));
     }
 }

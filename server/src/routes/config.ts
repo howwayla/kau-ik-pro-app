@@ -15,6 +15,17 @@ import { FugleMarketDataProvider } from '../providers/fugle/market.ts';
 import { MockMarketDataProvider } from '../providers/mock/market.ts';
 import { MockTradingProvider } from '../providers/mock/trading.ts';
 
+function publicBrokerMetadata(
+    metadata: { certPath?: string; apiUrl?: string } | undefined,
+) {
+    return metadata
+        ? {
+              cert_path: metadata.certPath ?? '',
+              api_url: metadata.apiUrl ?? '',
+          }
+        : null;
+}
+
 export function registerConfigRoutes(
     app: FastifyInstance,
     ctx: AppContext,
@@ -74,23 +85,59 @@ export function registerConfigRoutes(
 
     app.get('/api/v1/config/trade', async () => {
         const saved = ctx.runtimeConfig.get().brokerCreds;
+        const metadata = ctx.runtimeConfig.get().brokerMetadata;
         return {
             provider: ctx.trading.name(),
             creds: {
                 fubon: {
                     env: Boolean(envBrokerCreds('fubon')),
-                    saved: credsComplete(saved.fubon),
+                    saved: credsComplete(saved.fubon) || Boolean(metadata.fubon),
                 },
                 nova: {
                     env: Boolean(envBrokerCreds('nova')),
-                    saved: credsComplete(saved.nova),
+                    saved: credsComplete(saved.nova) || Boolean(metadata.nova),
                 },
                 esun: {
                     env: Boolean(envBrokerCreds('esun')),
-                    saved: credsComplete(saved.esun),
+                    saved: credsComplete(saved.esun) || Boolean(metadata.esun),
                 },
             },
+            metadata: {
+                fubon: publicBrokerMetadata(metadata.fubon),
+                nova: publicBrokerMetadata(metadata.nova),
+                esun: publicBrokerMetadata(metadata.esun),
+            },
         };
+    });
+
+    app.post<{
+        Body: {
+            provider?: 'mock' | 'fubon' | 'nova' | 'esun';
+            cert_path?: string;
+            api_url?: string;
+        };
+    }>('/api/v1/config/trade/metadata', async (req, reply) => {
+        const name = req.body?.provider;
+        if (!name || !['fubon', 'nova', 'esun'].includes(name)) {
+            return reply
+                .code(400)
+                .send({ detail: 'provider 需為 fubon | nova | esun' });
+        }
+        const certPath = req.body?.cert_path?.trim();
+        if (!certPath) {
+            return reply.code(400).send({ detail: '請提供憑證路徑' });
+        }
+        ctx.runtimeConfig.set({
+            tradeProvider: name,
+            brokerMetadata: {
+                ...ctx.runtimeConfig.get().brokerMetadata,
+                [name]: {
+                    certPath,
+                    apiUrl: req.body?.api_url?.trim() ?? '',
+                },
+            },
+        });
+        return { provider: name };
     });
 
     app.post<{
@@ -103,6 +150,7 @@ export function registerConfigRoutes(
             cert_path?: string;
             cert_pass?: string;
             api_url?: string;
+            persist_metadata?: boolean;
         };
     }>('/api/v1/config/trade', async (req, reply) => {
         const name = req.body?.provider;
@@ -173,15 +221,15 @@ export function registerConfigRoutes(
             name,
             ctx.runtimeConfig,
         );
-        // persist creds (gitignored server/data/config.json) so the next
-        // switch / boot doesn't need retyping
-        ctx.runtimeConfig.set({
-            tradeProvider: name,
-            brokerCreds: {
-                ...ctx.runtimeConfig.get().brokerCreds,
-                [name]: creds,
-            },
-        });
+        if (req.body?.persist_metadata !== false) {
+            ctx.runtimeConfig.set({
+                tradeProvider: name,
+                brokerCreds: {
+                    ...ctx.runtimeConfig.get().brokerCreds,
+                    [name]: creds,
+                },
+            });
+        }
         return {
             provider: name,
             market: market.name,

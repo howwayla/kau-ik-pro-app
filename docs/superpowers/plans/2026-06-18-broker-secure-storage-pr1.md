@@ -210,19 +210,19 @@ cargo test --manifest-path src-tauri/Cargo.toml broker_secret
 - Modify: `server/src/routes/config.ts`
 - Modify: `src/components/hud-header.tsx`
 
-- [ ] **Step 1: Write route/provider tests around saved state**
+- [x] **Step 1: Write route/provider tests around saved state**
 
 Use pure helpers or route-level fakes to prove successful login persists metadata only and saved-state checks do not rely on plaintext secret fields.
 
-- [ ] **Step 2: Verify tests fail**
+- [x] **Step 2: Verify tests fail**
 
 Run the new test command.
 
-- [ ] **Step 3: Implement minimal route changes**
+- [x] **Step 3: Implement minimal route changes**
 
 On successful broker login, write metadata only. Saved-login status should come from metadata plus secure-storage status, not from `credsComplete(savedBrokerCreds)`.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
 Run:
 

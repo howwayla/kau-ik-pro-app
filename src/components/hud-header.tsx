@@ -13,14 +13,26 @@ import {
     fetchMarketConfig,
     fetchTradeConfig,
     setMarketSource,
+    setTradeMetadata,
     setTradeSource,
     type MarketConfig,
     type TradeConfig,
     type TradeProviderName,
 } from '../lib/backend';
+import {
+    brokerMetadataFromSetupForm,
+    type BrokerName,
+    type BrokerSetupForm,
+} from '../lib/broker-secret-payload';
+import {
+    deleteBrokerSecrets,
+    loginBrokerWithSavedSecrets,
+    saveBrokerSecrets,
+} from '../lib/broker-secret-store';
 import { setCapabilities } from '../lib/capabilities';
 import { useTriggerStatus } from '../lib/triggers';
 import { SENSITIVE, setPrivacy, usePrivacy } from '../lib/privacy';
+import { isTauri } from '../lib/runtime';
 import { runSecureStorageSpike } from '../lib/secure-storage-spike';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
@@ -331,10 +343,8 @@ const BROKER_LABEL: Record<TradeProviderName, string> = {
 function BrokerMenu() {
     const [config, setConfig] = useState<TradeConfig | null>(null);
     // broker awaiting credentials input (no env/saved creds on the server)
-    const [pending, setPending] = useState<'fubon' | 'nova' | 'esun' | null>(
-        null,
-    );
-    const [form, setForm] = useState({
+    const [pending, setPending] = useState<BrokerName | null>(null);
+    const [form, setForm] = useState<BrokerSetupForm>({
         idNo: '',
         password: '',
         apiKey: '',
@@ -359,35 +369,83 @@ function BrokerMenu() {
             .catch(() => setConfig(null));
     }, []);
 
+    const finishSwitch = (warning?: string | null) => {
+        if (warning) {
+            setError(`⚠ ${warning}（5 秒後重新整理）`);
+            setTimeout(() => window.location.reload(), 5000);
+            return;
+        }
+        // contract caches / charts hold old-provider data — full reload
+        window.location.reload();
+    };
+
+    const switchWithNewCredentials = async (
+        provider: BrokerName,
+        creds: BrokerSetupForm,
+    ) => {
+        const res = await setTradeSource({
+            provider,
+            id_no: creds.idNo,
+            password: creds.password,
+            api_key: creds.apiKey,
+            api_secret: creds.apiSecret,
+            cert_path: creds.certPath,
+            cert_pass: creds.certPass,
+            api_url: creds.apiUrl,
+            persist_metadata: isTauri ? false : undefined,
+        });
+        if (!isTauri) return res;
+
+        let savedSecrets = false;
+        try {
+            await saveBrokerSecrets(provider, creds);
+            savedSecrets = true;
+            await setTradeMetadata(brokerMetadataFromSetupForm(provider, creds));
+        } catch (storageError) {
+            if (savedSecrets) {
+                await deleteBrokerSecrets(provider).catch(() => null);
+            }
+            await setTradeSource({ provider: 'mock' }).catch(() => null);
+            const message =
+                storageError instanceof Error
+                    ? storageError.message
+                    : String(storageError);
+            throw new Error(`安全儲存未完成，已退回模擬：${message}`);
+        }
+        return res;
+    };
+
     const doSwitch = async (
         provider: TradeProviderName,
-        creds?: typeof form,
+        creds?: BrokerSetupForm,
     ) => {
         if (busy) return;
         setBusy(provider);
         setError('');
         try {
-            const res = await setTradeSource({
-                provider,
-                ...(creds
-                    ? {
-                          id_no: creds.idNo,
-                          password: creds.password,
-                          api_key: creds.apiKey,
-                          api_secret: creds.apiSecret,
-                          cert_path: creds.certPath,
-                          cert_pass: creds.certPass,
-                      }
-                    : {}),
-            });
-            if (res.warning) {
-                setError(`⚠ ${res.warning}（5 秒後重新整理）`);
-                setTimeout(() => window.location.reload(), 5000);
-                return;
-            }
-            // contract caches / charts hold old-provider data — full reload
-            window.location.reload();
+            const res =
+                provider !== 'mock' && creds
+                    ? await switchWithNewCredentials(provider, creds)
+                    : await setTradeSource({ provider });
+            finishSwitch(res.warning);
         } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            setBusy(null);
+        }
+    };
+
+    const doSavedSwitch = async (
+        provider: BrokerName,
+        metadata: NonNullable<TradeConfig['metadata'][BrokerName]>,
+    ) => {
+        if (busy) return;
+        setBusy(provider);
+        setError('');
+        try {
+            const res = await loginBrokerWithSavedSecrets(provider, metadata);
+            finishSwitch(res.warning);
+        } catch (e) {
+            setPending(provider);
             setError(e instanceof Error ? e.message : String(e));
             setBusy(null);
         }
@@ -400,8 +458,10 @@ function BrokerMenu() {
             return;
         }
         const avail = config?.creds?.[provider];
-        if (avail?.saved || avail?.env) {
+        if (avail?.env) {
             void doSwitch(provider);
+        } else if (avail?.saved && isTauri && config?.metadata?.[provider]) {
+            void doSavedSwitch(provider, config.metadata[provider]);
         } else {
             setPending(provider);
             setError('');
@@ -486,6 +546,7 @@ function BrokerMenu() {
                                         apiSecret: '',
                                         certPath: '',
                                         certPass: '',
+                                        apiUrl: '',
                                     });
                                     setError('');
                                 }}
@@ -497,8 +558,7 @@ function BrokerMenu() {
                     {pending && (
                         <>
                             <span className={styles.settingLabel}>
-                                {BROKER_LABEL[pending]}憑證（僅存於本機
-                                server/data/config.json）
+                                {BROKER_LABEL[pending]}憑證（登入資訊存於系統安全儲存）
                             </span>
                             <input
                                 className={styles.saveInput}
@@ -578,7 +638,9 @@ function BrokerMenu() {
                                 disabled={Boolean(busy) || !formReady}
                                 onClick={() => void doSwitch(pending, form)}
                             >
-                                {busy ? '登入中…（約 10 秒）' : '✓ 登入並切換'}
+                                {busy
+                                    ? '登入中…（約 10 秒）'
+                                    : '✓ 儲存並登入'}
                             </button>
                         </>
                     )}

@@ -84,6 +84,10 @@ export interface TradeConfig {
         'fubon' | 'nova' | 'esun',
         { env: boolean; saved: boolean }
     >;
+    metadata: Record<
+        'fubon' | 'nova' | 'esun',
+        { cert_path: string; api_url: string } | null
+    >;
 }
 
 export function fetchTradeConfig() {
@@ -100,12 +104,24 @@ export function setTradeSource(body: {
     cert_path?: string;
     cert_pass?: string;
     api_url?: string;
+    persist_metadata?: boolean;
 }) {
     return apiPost<{
         provider: TradeProviderName;
         market: MarketProviderName;
         warning?: string;
     }>('/api/v1/config/trade', body);
+}
+
+export function setTradeMetadata(body: {
+    provider: Exclude<TradeProviderName, 'mock'>;
+    cert_path: string;
+    api_url?: string;
+}) {
+    return apiPost<{ provider: Exclude<TradeProviderName, 'mock'> }>(
+        '/api/v1/config/trade/metadata',
+        body,
+    );
 }
 
 // ---- broker-side condition orders (L1) ----
