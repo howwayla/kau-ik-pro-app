@@ -273,6 +273,7 @@ export function BrokerSetupWizard({
                                         setForm(emptyBrokerSetupForm());
                                         setErrors({});
                                         setSubmitError('');
+                                        setStep(1);
                                     }}
                                 >
                                     <strong>{BROKER_LABEL[choice]}</strong>
