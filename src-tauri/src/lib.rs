@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{
@@ -17,6 +17,7 @@ struct NovaServer(Mutex<Option<CommandChild>>);
 const SECURE_STORAGE_SPIKE_SERVICE: &str = "io.github.howwayla.kauikpro.secure-storage-spike";
 const SECURE_STORAGE_SPIKE_ACCOUNT: &str = "roundtrip-test";
 const SECURE_STORAGE_SPIKE_VALUE: &str = "kau-ik-pro-spike-value-v1";
+const BROKER_SECRET_SERVICE: &str = "io.github.howwayla.kauikpro.broker-secrets";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +50,116 @@ impl SecureStorageSpikeResult {
 
 fn secure_storage_spike_entry() -> Result<keyring::Entry, keyring::Error> {
     keyring::Entry::new(SECURE_STORAGE_SPIKE_SERVICE, SECURE_STORAGE_SPIKE_ACCOUNT)
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSecrets {
+    id_no: String,
+    password: String,
+    api_key: String,
+    api_secret: String,
+    cert_pass: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSecretCommandResult {
+    ok: bool,
+    present: bool,
+    error: Option<String>,
+}
+
+impl BrokerSecretCommandResult {
+    fn ok(present: bool) -> Self {
+        Self {
+            ok: true,
+            present,
+            error: None,
+        }
+    }
+
+    fn error(error: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            present: false,
+            error: Some(error.into()),
+        }
+    }
+}
+
+fn broker_secret_account(broker: &str) -> Result<&'static str, String> {
+    match broker {
+        "fubon" => Ok("fubon:v1"),
+        "nova" => Ok("nova:v1"),
+        "esun" => Ok("esun:v1"),
+        _ => Err("unsupported broker".to_string()),
+    }
+}
+
+fn broker_secret_entry(broker: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(BROKER_SECRET_SERVICE, broker_secret_account(broker)?)
+        .map_err(|err| err.to_string())
+}
+
+fn broker_secrets_to_json(secrets: &BrokerSecrets) -> Result<String, serde_json::Error> {
+    serde_json::to_string(secrets)
+}
+
+fn broker_secrets_from_json(json: &str) -> Result<BrokerSecrets, serde_json::Error> {
+    serde_json::from_str(json)
+}
+
+pub fn broker_secret_save_result(
+    broker: &str,
+    secrets: BrokerSecrets,
+) -> BrokerSecretCommandResult {
+    let entry = match broker_secret_entry(broker) {
+        Ok(entry) => entry,
+        Err(err) => return BrokerSecretCommandResult::error(err),
+    };
+    let json = match broker_secrets_to_json(&secrets) {
+        Ok(json) => json,
+        Err(err) => return BrokerSecretCommandResult::error(err.to_string()),
+    };
+    match entry.set_password(&json) {
+        Ok(()) => BrokerSecretCommandResult::ok(true),
+        Err(err) => BrokerSecretCommandResult::error(err.to_string()),
+    }
+}
+
+pub fn broker_secret_status_result(broker: &str) -> BrokerSecretCommandResult {
+    let entry = match broker_secret_entry(broker) {
+        Ok(entry) => entry,
+        Err(err) => return BrokerSecretCommandResult::error(err),
+    };
+    match entry.get_password() {
+        Ok(_) => BrokerSecretCommandResult::ok(true),
+        Err(keyring::Error::NoEntry) => BrokerSecretCommandResult::ok(false),
+        Err(err) => BrokerSecretCommandResult::error(err.to_string()),
+    }
+}
+
+pub fn broker_secret_load_result(broker: &str) -> Result<Option<BrokerSecrets>, String> {
+    let entry = broker_secret_entry(broker)?;
+    match entry.get_password() {
+        Ok(json) => broker_secrets_from_json(&json)
+            .map(Some)
+            .map_err(|err| err.to_string()),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+pub fn broker_secret_delete_result(broker: &str) -> BrokerSecretCommandResult {
+    let entry = match broker_secret_entry(broker) {
+        Ok(entry) => entry,
+        Err(err) => return BrokerSecretCommandResult::error(err),
+    };
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => BrokerSecretCommandResult::ok(false),
+        Err(err) => BrokerSecretCommandResult::error(err.to_string()),
+    }
 }
 
 pub fn secure_storage_spike_write_result() -> SecureStorageSpikeResult {
@@ -125,6 +236,21 @@ fn secure_storage_spike_delete() -> SecureStorageSpikeResult {
     secure_storage_spike_delete_result()
 }
 
+#[tauri::command]
+fn broker_secret_save(broker: String, secrets: BrokerSecrets) -> BrokerSecretCommandResult {
+    broker_secret_save_result(&broker, secrets)
+}
+
+#[tauri::command]
+fn broker_secret_status(broker: String) -> BrokerSecretCommandResult {
+    broker_secret_status_result(&broker)
+}
+
+#[tauri::command]
+fn broker_secret_delete(broker: String) -> BrokerSecretCommandResult {
+    broker_secret_delete_result(&broker)
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
@@ -195,7 +321,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             secure_storage_spike_write,
             secure_storage_spike_read,
-            secure_storage_spike_delete
+            secure_storage_spike_delete,
+            broker_secret_save,
+            broker_secret_status,
+            broker_secret_delete
         ])
         .setup(|app| {
             // ---- bundled Node server sidecar (auto-started; killed on exit) ----
@@ -274,5 +403,32 @@ mod tests {
         );
         assert_eq!(SECURE_STORAGE_SPIKE_ACCOUNT, "roundtrip-test");
         assert_eq!(SECURE_STORAGE_SPIKE_VALUE, "kau-ik-pro-spike-value-v1");
+    }
+
+    #[test]
+    fn broker_secret_accounts_are_fixed_for_supported_brokers() {
+        assert_eq!(broker_secret_account("fubon").unwrap(), "fubon:v1");
+        assert_eq!(broker_secret_account("nova").unwrap(), "nova:v1");
+        assert_eq!(broker_secret_account("esun").unwrap(), "esun:v1");
+        assert!(broker_secret_account("sinopac").is_err());
+    }
+
+    #[test]
+    fn broker_secret_payload_roundtrips_without_metadata_fields() {
+        let secrets = BrokerSecrets {
+            id_no: "A123456789".to_string(),
+            password: "account-pass".to_string(),
+            api_key: "api-key".to_string(),
+            api_secret: "api-secret".to_string(),
+            cert_pass: "cert-pass".to_string(),
+        };
+
+        let json = broker_secrets_to_json(&secrets).unwrap();
+
+        assert!(json.contains("\"idNo\""));
+        assert!(json.contains("\"certPass\""));
+        assert!(!json.contains("certPath"));
+        assert!(!json.contains("apiUrl"));
+        assert_eq!(broker_secrets_from_json(&json).unwrap(), secrets);
     }
 }

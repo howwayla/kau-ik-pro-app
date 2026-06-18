@@ -172,11 +172,11 @@ Expected: `ALL GREEN`.
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `src-tauri/src/main.rs`
 
-- [ ] **Step 1: Write Rust tests for fixed broker identifiers**
+- [x] **Step 1: Write Rust tests for fixed broker identifiers**
 
 Test that only `fubon`, `nova`, and `esun` map to fixed keyring accounts and that unsupported broker names are rejected.
 
-- [ ] **Step 2: Verify tests fail**
+- [x] **Step 2: Verify tests fail**
 
 Run:
 
@@ -184,7 +184,7 @@ Run:
 cargo test --manifest-path src-tauri/Cargo.toml broker_secret
 ```
 
-- [ ] **Step 3: Implement broker secret get/set/delete internals**
+- [x] **Step 3: Implement broker secret get/set/delete internals**
 
 Store one JSON blob per broker under a fixed service and fixed account:
 
@@ -195,7 +195,7 @@ account = fubon:v1 | nova:v1 | esun:v1
 
 Invoke commands must return status only; internal login helpers may read secrets.
 
-- [ ] **Step 4: Verify Rust tests pass**
+- [x] **Step 4: Verify Rust tests pass**
 
 Run:
 
