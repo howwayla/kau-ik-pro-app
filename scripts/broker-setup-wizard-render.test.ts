@@ -42,3 +42,13 @@ test('BrokerSetupWizard renders an initial error when opened after saved-login f
 
     assert.match(html, new RegExp(message));
 });
+
+test('BrokerSetupWizard renders esun config import instead of manual key fields', async () => {
+    const html = await renderWizard({ initialBroker: 'esun' });
+
+    assert.match(html, /匯入玉山設定檔/);
+    assert.match(html, /登入密碼/);
+    assert.match(html, /憑證密碼/);
+    assert.doesNotMatch(html, /API Key/);
+    assert.doesNotMatch(html, /API Secret/);
+});

@@ -31,7 +31,7 @@ export const BROKER_ACCOUNT_LABEL: Record<BrokerName, string> = {
 const FIELD_KEYS_BY_BROKER: Record<BrokerName, BrokerSetupFieldKey[]> = {
     fubon: ['idNo', 'password', 'apiKey', 'certPath', 'certPass'],
     nova: ['idNo', 'password', 'certPath', 'certPass', 'apiUrl'],
-    esun: ['idNo', 'password', 'apiKey', 'apiSecret', 'certPath', 'certPass'],
+    esun: ['password', 'certPath', 'certPass'],
 };
 
 export function emptyBrokerSetupForm(): BrokerSetupForm {
@@ -56,8 +56,12 @@ export function validateBrokerSetupForm(
 ): BrokerSetupErrors {
     const errors: BrokerSetupErrors = {};
 
-    if (!value(form.idNo)) {
-        errors.idNo = broker === 'esun' ? '請填證券帳號' : '請填身分證字號';
+    if (broker === 'esun') {
+        if (!value(form.idNo) || !value(form.apiKey) || !value(form.apiSecret)) {
+            errors.apiKey = '請先匯入玉山設定檔';
+        }
+    } else if (!value(form.idNo)) {
+        errors.idNo = '請填身分證字號';
     }
 
     if (broker === 'fubon') {
@@ -66,15 +70,6 @@ export function validateBrokerSetupForm(
         }
     } else if (!value(form.password)) {
         errors.password = '請填登入密碼';
-    }
-
-    if (broker === 'esun') {
-        if (!value(form.apiKey)) {
-            errors.apiKey = '請填 API Key';
-        }
-        if (!value(form.apiSecret)) {
-            errors.apiSecret = '請填 API Secret';
-        }
     }
 
     if (!value(form.certPath)) {

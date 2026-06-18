@@ -37,7 +37,7 @@ test('fieldsForBroker returns nova setup fields in order', () => {
 test('fieldsForBroker returns esun setup fields in order', () => {
     assert.deepEqual(
         fieldsForBroker('esun').map((field) => field.key),
-        ['idNo', 'password', 'apiKey', 'apiSecret', 'certPath', 'certPass'],
+        ['password', 'certPath', 'certPass'],
     );
 });
 
@@ -70,12 +70,11 @@ test('fubon validation requires password or apiKey', () => {
     });
 });
 
-test('esun validation requires apiKey and apiSecret', () => {
-    const form = { ...filled(), apiKey: '', apiSecret: '' };
+test('esun validation requires imported config credentials', () => {
+    const form = { ...filled(), idNo: '', apiKey: '', apiSecret: '' };
 
     assert.deepEqual(validateBrokerSetupForm('esun', form), {
-        apiKey: '請填 API Key',
-        apiSecret: '請填 API Secret',
+        apiKey: '請先匯入玉山設定檔',
     });
 });
 

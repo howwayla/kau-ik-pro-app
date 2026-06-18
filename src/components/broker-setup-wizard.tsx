@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     fetchTradeConfig,
     setDefaultTradeBroker,
@@ -25,6 +25,11 @@ import {
     validateBrokerSetupForm,
     type BrokerSetupErrors,
 } from '../lib/broker-setup-fields';
+import {
+    applyEsunConfigToForm,
+    isAbsoluteCertificatePath,
+    parseEsunConfigIni,
+} from '../lib/esun-config-import';
 import * as styles from './broker-setup-wizard.css';
 
 export interface BrokerSetupWizardProps {
@@ -57,6 +62,8 @@ export function BrokerSetupWizard({
     const [busy, setBusy] = useState(false);
     const [submitError, setSubmitError] = useState(initialError);
     const [makeDefault, setMakeDefault] = useState(false);
+    const [esunConfigStatus, setEsunConfigStatus] = useState('');
+    const esunConfigInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         if (!open) return;
@@ -67,6 +74,7 @@ export function BrokerSetupWizard({
         setBusy(false);
         setSubmitError(initialError);
         setMakeDefault(false);
+        setEsunConfigStatus('');
     }, [open, initialBroker, initialError]);
 
     const fields = useMemo(
@@ -108,6 +116,37 @@ export function BrokerSetupWizard({
             if (path) updateField('certPath', path);
         } catch (e) {
             setSubmitError(e instanceof Error ? e.message : String(e));
+        }
+    };
+
+    const importEsunConfig = async (file: File | null | undefined) => {
+        if (!file) return;
+
+        try {
+            const parsed = parseEsunConfigIni(await file.text());
+            setForm((current) => applyEsunConfigToForm(current, parsed));
+            setErrors((current) => ({
+                ...current,
+                idNo: undefined,
+                apiKey: undefined,
+                apiSecret: undefined,
+                apiUrl: undefined,
+            }));
+            setSubmitError('');
+
+            const certNote =
+                parsed.certPath &&
+                !isAbsoluteCertificatePath(parsed.certPath)
+                    ? '，請再選擇憑證檔'
+                    : '';
+            setEsunConfigStatus(`已讀取 ${file.name}${certNote}`);
+        } catch (e) {
+            setEsunConfigStatus('');
+            setSubmitError(e instanceof Error ? e.message : String(e));
+        } finally {
+            if (esunConfigInputRef.current) {
+                esunConfigInputRef.current.value = '';
+            }
         }
     };
 
@@ -275,6 +314,7 @@ export function BrokerSetupWizard({
                                         setForm(emptyBrokerSetupForm());
                                         setErrors({});
                                         setSubmitError('');
+                                        setEsunConfigStatus('');
                                         setStep(1);
                                     }}
                                 >
@@ -287,6 +327,49 @@ export function BrokerSetupWizard({
 
                     {step === 1 && broker && (
                         <>
+                            {broker === 'esun' && (
+                                <div className={styles.importPanel}>
+                                    <input
+                                        ref={esunConfigInputRef}
+                                        accept='.ini,.example'
+                                        className={styles.hiddenFileInput}
+                                        type='file'
+                                        onChange={(e) =>
+                                            void importEsunConfig(
+                                                e.currentTarget.files?.[0],
+                                            )
+                                        }
+                                    />
+                                    <div className={styles.importRow}>
+                                        <div className={styles.importCopy}>
+                                            <strong>匯入玉山設定檔</strong>
+                                            <span>
+                                                選擇 config.ini 或
+                                                config.simulation.ini.example
+                                            </span>
+                                        </div>
+                                        <button
+                                            className={styles.secondaryButton}
+                                            disabled={busy}
+                                            type='button'
+                                            onClick={() =>
+                                                esunConfigInputRef.current?.click()
+                                            }
+                                        >
+                                            匯入設定檔
+                                        </button>
+                                    </div>
+                                    <span
+                                        className={
+                                            esunConfigStatus
+                                                ? styles.successText
+                                                : styles.errorText
+                                        }
+                                    >
+                                        {esunConfigStatus || errors.apiKey || ''}
+                                    </span>
+                                </div>
+                            )}
                             <div className={styles.fieldGrid}>
                                 {fields.map((field) => (
                                     <label

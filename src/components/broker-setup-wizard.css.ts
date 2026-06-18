@@ -174,6 +174,54 @@ export const field = style({
     gap: vars.space.xs,
 });
 
+export const importPanel = style({
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: vars.space.xs,
+    marginBottom: vars.space.md,
+    padding: vars.space.md,
+    background: vars.color.inset,
+    border: `1px solid ${vars.color.border}`,
+    borderRadius: vars.radius.md,
+});
+
+export const importRow = style({
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    gap: vars.space.sm,
+    alignItems: 'center',
+    '@media': {
+        '(max-width: 520px)': {
+            gridTemplateColumns: '1fr',
+        },
+    },
+});
+
+export const importCopy = style({
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: '2px',
+});
+
+globalStyle(`${importCopy} strong`, {
+    fontFamily: vars.font.display,
+    fontSize: '0.76rem',
+    color: vars.color.foreground,
+});
+
+globalStyle(`${importCopy} span`, {
+    fontSize: '0.68rem',
+    lineHeight: 1.35,
+    color: vars.color.mutedForeground,
+    overflowWrap: 'anywhere',
+});
+
+export const hiddenFileInput = style({
+    display: 'none',
+});
+
 export const label = style({
     fontFamily: vars.font.display,
     fontSize: '0.66rem',
@@ -237,6 +285,16 @@ export const errorText = style({
     fontSize: '0.68rem',
     lineHeight: 1.35,
     color: vars.color.danger,
+    wordBreak: 'break-word',
+});
+
+export const successText = style({
+    display: 'block',
+    minHeight: '1rem',
+    margin: 0,
+    fontSize: '0.68rem',
+    lineHeight: 1.35,
+    color: vars.color.success,
     wordBreak: 'break-word',
 });
 
