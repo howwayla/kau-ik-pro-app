@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+    fetchTradeConfig,
     setDefaultTradeBroker,
     setTradeMetadata,
     setTradeSource,
@@ -143,21 +144,41 @@ export function BrokerSetupWizard({
             liveSwitchSucceeded = true;
 
             if (isTauri) {
+                const previousMetadata = (await fetchTradeConfig()).metadata[
+                    broker
+                ];
                 const existingSecrets = await statusBrokerSecrets(broker).catch(
                     () => null,
                 );
-                let savedSecrets = false;
-                try {
-                    await saveBrokerSecrets(broker, form);
-                    savedSecrets = true;
-                    await setTradeMetadata(
-                        brokerMetadataFromSetupForm(broker, form),
-                    );
-                } catch (storageError) {
-                    if (savedSecrets && existingSecrets?.present === false) {
-                        await deleteBrokerSecrets(broker).catch(() => null);
+                const nextMetadata = brokerMetadataFromSetupForm(broker, form);
+
+                if (previousMetadata) {
+                    await setTradeMetadata(nextMetadata);
+                    try {
+                        await saveBrokerSecrets(broker, form);
+                    } catch (storageError) {
+                        await setTradeMetadata({
+                            provider: broker,
+                            cert_path: previousMetadata.cert_path,
+                            api_url: previousMetadata.api_url,
+                        }).catch(() => null);
+                        throw storageError;
                     }
-                    throw storageError;
+                } else {
+                    let savedSecrets = false;
+                    try {
+                        await saveBrokerSecrets(broker, form);
+                        savedSecrets = true;
+                        await setTradeMetadata(nextMetadata);
+                    } catch (storageError) {
+                        if (
+                            savedSecrets &&
+                            existingSecrets?.present === false
+                        ) {
+                            await deleteBrokerSecrets(broker).catch(() => null);
+                        }
+                        throw storageError;
+                    }
                 }
             }
 
