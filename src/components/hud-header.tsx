@@ -335,6 +335,7 @@ const BROKER_LABEL: Record<TradeProviderName, string> = {
 function BrokerMenu() {
     const [config, setConfig] = useState<TradeConfig | null>(null);
     const [wizardBroker, setWizardBroker] = useState<BrokerName | null>(null);
+    const [wizardError, setWizardError] = useState('');
     const [wizardOpen, setWizardOpen] = useState(false);
     const [busy, setBusy] = useState<TradeProviderName | null>(null);
     const [error, setError] = useState('');
@@ -352,6 +353,12 @@ function BrokerMenu() {
             })
             .catch(() => setConfig(null));
     }, []);
+
+    const openWizard = (broker: BrokerName | null, message = '') => {
+        setWizardBroker(broker);
+        setWizardError(message);
+        setWizardOpen(true);
+    };
 
     const finishSwitch = (warning?: string | null) => {
         if (warning) {
@@ -379,6 +386,7 @@ function BrokerMenu() {
     const doSavedSwitch = async (
         provider: BrokerName,
         metadata: NonNullable<TradeConfig['metadata'][BrokerName]>,
+        close?: () => void,
     ) => {
         if (busy) return;
         setBusy(provider);
@@ -387,14 +395,18 @@ function BrokerMenu() {
             const res = await loginBrokerWithSavedSecrets(provider, metadata);
             finishSwitch(res.warning);
         } catch (e) {
-            setWizardBroker(provider);
-            setWizardOpen(true);
-            setError(e instanceof Error ? e.message : String(e));
+            const message = e instanceof Error ? e.message : String(e);
+            close?.();
+            openWizard(
+                provider,
+                `已儲存的登入資訊無法使用，請重新設定：${message}`,
+            );
+            setError(message);
             setBusy(null);
         }
     };
 
-    const pick = (provider: TradeProviderName) => {
+    const pick = (provider: TradeProviderName, close?: () => void) => {
         if (provider === current || busy) return;
         if (provider === 'mock') {
             void doSwitch('mock');
@@ -404,10 +416,10 @@ function BrokerMenu() {
         if (avail?.env) {
             void doSwitch(provider);
         } else if (avail?.saved && isTauri && config?.metadata?.[provider]) {
-            void doSavedSwitch(provider, config.metadata[provider]);
+            void doSavedSwitch(provider, config.metadata[provider], close);
         } else {
-            setWizardBroker(provider);
-            setWizardOpen(true);
+            close?.();
+            openWizard(provider);
             setError('');
         }
     };
@@ -436,7 +448,7 @@ function BrokerMenu() {
     return (
         <>
             <Menu label={`券商·${BROKER_LABEL[current]}`}>
-                {() => (
+                {(close) => (
                     <>
                         <span className={styles.settingLabel}>
                             券商 Trading Broker
@@ -458,7 +470,7 @@ function BrokerMenu() {
                                             ]
                                         }
                                         disabled={Boolean(busy)}
-                                        onClick={() => pick(p)}
+                                        onClick={() => pick(p, close)}
                                     >
                                         {busy === p
                                             ? '登入中…'
@@ -471,8 +483,8 @@ function BrokerMenu() {
                             className={styles.menuItem}
                             disabled={Boolean(busy)}
                             onClick={() => {
-                                setWizardBroker(null);
-                                setWizardOpen(true);
+                                close();
+                                openWizard(null);
                             }}
                         >
                             設定券商登入
@@ -487,8 +499,8 @@ function BrokerMenu() {
                                     className={styles.menuItem}
                                     disabled={Boolean(busy)}
                                     onClick={() => {
-                                        setWizardBroker(p);
-                                        setWizardOpen(true);
+                                        close();
+                                        openWizard(p);
                                         setError('');
                                     }}
                                 >
@@ -536,6 +548,7 @@ function BrokerMenu() {
             <BrokerSetupWizard
                 open={wizardOpen}
                 initialBroker={wizardBroker}
+                initialError={wizardError}
                 currentBroker={current}
                 configured={{
                     fubon: Boolean(

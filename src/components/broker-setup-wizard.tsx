@@ -30,6 +30,7 @@ import * as styles from './broker-setup-wizard.css';
 export interface BrokerSetupWizardProps {
     open: boolean;
     initialBroker: BrokerName | null;
+    initialError?: string;
     configured: Record<BrokerName, boolean>;
     currentBroker: BrokerName | 'mock';
     onClose: () => void;
@@ -42,18 +43,19 @@ const TITLE_ID = 'broker-setup-wizard-title';
 export function BrokerSetupWizard({
     open,
     initialBroker,
+    initialError = '',
     configured,
     currentBroker,
     onClose,
 }: BrokerSetupWizardProps) {
-    const [step, setStep] = useState(0);
-    const [broker, setBroker] = useState<BrokerName | null>(null);
+    const [step, setStep] = useState(initialBroker ? 1 : 0);
+    const [broker, setBroker] = useState<BrokerName | null>(initialBroker);
     const [form, setForm] = useState<BrokerSetupForm>(() =>
         emptyBrokerSetupForm(),
     );
     const [errors, setErrors] = useState<BrokerSetupErrors>({});
     const [busy, setBusy] = useState(false);
-    const [submitError, setSubmitError] = useState('');
+    const [submitError, setSubmitError] = useState(initialError);
     const [makeDefault, setMakeDefault] = useState(false);
 
     useEffect(() => {
@@ -63,9 +65,9 @@ export function BrokerSetupWizard({
         setForm(emptyBrokerSetupForm());
         setErrors({});
         setBusy(false);
-        setSubmitError('');
+        setSubmitError(initialError);
         setMakeDefault(false);
-    }, [open, initialBroker]);
+    }, [open, initialBroker, initialError]);
 
     const fields = useMemo(
         () => (broker ? fieldsForBroker(broker) : []),
