@@ -1,9 +1,9 @@
 # Broker Login UX and Secure Storage Design
 
 Date: 2026-06-17
-Reviewed: 2026-06-18 — read "Implementation Review" before building. Two open
-decisions should be resolved first: the target persona, and where secure
-storage lives (Rust/Tauri layer vs Node/Bun sidecar).
+Reviewed: 2026-06-18 — read "Implementation Review" before building. The target
+persona is now resolved; secure-storage placement remains pending a packaged
+spike comparing the Rust/Tauri layer with the Node/Bun sidecar.
 
 ## Purpose
 
@@ -40,21 +40,18 @@ accounts use "Change login data" to replace that broker's setup.
 
 Reviewed against the current codebase before implementation. Most of the
 user-facing flow described below is already built (see "Already exists" for the
-specific files); the genuinely new and hard part is OS secure storage. Resolve
-the two open decisions before Codex starts.
+specific files); the genuinely new and hard part is OS secure storage.
 
-### Open Decisions (resolve first)
+### Decision Status
 
-1. **Target persona.** The Purpose targets "non-technical users without
-   understanding environment variables." The project's stated audience is
-   people willing to build from source with AI assistance (clone → build → run →
-   recover from errors). These are different personas, and which one we mean
-   changes how much of the UI polish (Broker Center rebrand, file picker, daily
-   notices) is worth building now versus later. Confirm whether this is a
-   deliberate broadening. If it is not, prioritize the storage and
-   certificate-import improvements and treat the UI rebrand as optional.
+1. **Target persona — resolved.** This is a deliberate broadening toward
+   non-technical desktop users. The app should still support source-build users,
+   but the broker setup experience should not require environment variables,
+   absolute paths, Keychain knowledge, or config-file editing.
 
-2. **Where secure storage lives — Rust/Tauri layer vs Node/Bun sidecar.** This
+2. **Where secure storage lives — pending spike.** Rust/Tauri layer vs
+   Node/Bun sidecar must be compared on a packaged build before implementation.
+   This
    spec places `BrokerSecretStore` in the Node sidecar (see "Secure Storage
    Abstraction"). That is the riskiest placement:
    - Node OS-keychain access almost always goes through `keytar`, which is
@@ -69,7 +66,8 @@ the two open decisions before Codex starts.
    - Recommended default: do keychain access in the **Rust/Tauri layer**
      (e.g. `keyring-rs`) and have the sidecar request assembled credentials over
      the existing local HTTP boundary or a Tauri command. The spike (Rollout
-     step 1) must compare both placements on a *packaged* build, not just `dev`.
+     step 1) must compare both placements on a *packaged* build, not just `dev`,
+     and then update this spec with the selected placement.
 
 ### Already exists — do not rebuild
 
@@ -102,6 +100,10 @@ The eight-step rollout is one very large PR. Split it:
   absolute certificate paths, and plaintext passwords in `config.json`.
 - **PR 2 (polish):** Broker Center rebrand, startup preference / auto-login,
   daily real-environment notice.
+
+The first implementation plan should target PR 1 only. PR 2 remains part of the
+product direction, but it should not block removing plaintext secrets and
+absolute certificate paths from the current flow.
 
 ### Smaller notes
 
@@ -325,7 +327,7 @@ This keeps provider code focused on broker SDK behavior and keeps storage
 decisions isolated.
 
 > **Review (2026-06-18):** The interface is the right shape, but its *placement*
-> is an open decision (see Implementation Review → Open Decisions #2). If
+> is pending spike validation (see Implementation Review → Decision Status #2). If
 > keychain access ends up in the Rust/Tauri layer, this interface still lives in
 > the sidecar but its implementation calls out to Tauri rather than to a native
 > Node keychain module. Decide placement in the spike before writing the
@@ -399,7 +401,7 @@ Manual verification:
 
 1. Spike secure storage on a **packaged** build (not just `dev`) across macOS,
    Windows, and the Linux fallback, comparing keychain access in the Rust/Tauri
-   layer versus the Node sidecar (see Implementation Review → Open Decisions #2).
+   layer versus the Node sidecar (see Implementation Review → Decision Status #2).
    Pick the placement before step 2.
 2. Finalize the credential-store implementation choice based on the spike.
 3. Implement metadata-only config and migration.
