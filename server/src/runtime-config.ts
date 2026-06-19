@@ -3,15 +3,24 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import {
+    splitBrokerCreds,
+    type BrokerMetadata,
+} from './broker-credential-parts.ts';
 import type { BrokerCreds, TradeProviderName } from './config.ts';
+
+type BrokerKey = 'fubon' | 'nova' | 'esun';
 
 export interface RuntimeConfig {
     /** standalone market choice (broker modes carry their own market data) */
     marketProvider: 'mock' | 'fugle';
     fugleApiKey: string;
     tradeProvider: TradeProviderName;
-    /** credentials saved from the dashboard switcher (gitignored file) */
-    brokerCreds: Partial<Record<'fubon' | 'nova' | 'esun', BrokerCreds>>;
+    defaultTradeBroker: BrokerKey | null;
+    /** non-secret broker setup metadata persisted to config.json */
+    brokerMetadata: Partial<Record<BrokerKey, BrokerMetadata>>;
+    /** legacy/plaintext credentials kept in memory only for migration */
+    brokerCreds: Partial<Record<BrokerKey, BrokerCreds>>;
 }
 
 export class RuntimeConfigStore {
@@ -27,13 +36,22 @@ export class RuntimeConfigStore {
         } catch {
             // first run — use env seed
         }
+        const legacyCreds = loaded.brokerCreds ?? {};
         this.config = {
             marketProvider:
                 loaded.marketProvider ??
                 (envSeed.marketProvider === 'fugle' ? 'fugle' : 'mock'),
             fugleApiKey: loaded.fugleApiKey ?? envSeed.fugleApiKey ?? '',
             tradeProvider: loaded.tradeProvider ?? 'mock',
-            brokerCreds: loaded.brokerCreds ?? {},
+            defaultTradeBroker:
+                loaded.defaultTradeBroker === 'fubon' ||
+                loaded.defaultTradeBroker === 'nova' ||
+                loaded.defaultTradeBroker === 'esun'
+                    ? loaded.defaultTradeBroker
+                    : null,
+            brokerMetadata:
+                loaded.brokerMetadata ?? deriveBrokerMetadata(legacyCreds),
+            brokerCreds: legacyCreds,
         };
     }
 
@@ -42,11 +60,40 @@ export class RuntimeConfigStore {
     }
 
     set(patch: Partial<RuntimeConfig>): void {
-        this.config = { ...this.config, ...patch };
+        const brokerMetadata = {
+            ...this.config.brokerMetadata,
+            ...deriveBrokerMetadata(patch.brokerCreds),
+            ...patch.brokerMetadata,
+        };
+        this.config = { ...this.config, ...patch, brokerMetadata };
         mkdirSync(dirname(this.filePath), { recursive: true });
-        // may hold broker credentials — owner-only
-        writeFileSync(this.filePath, JSON.stringify(this.config, null, 2), {
-            mode: 0o600,
-        });
+        writeFileSync(
+            this.filePath,
+            JSON.stringify(persistedConfig(this.config), null, 2),
+            {
+                mode: 0o600,
+            },
+        );
     }
+}
+
+function deriveBrokerMetadata(
+    brokerCreds: Partial<Record<BrokerKey, BrokerCreds>> | undefined,
+): Partial<Record<BrokerKey, BrokerMetadata>> {
+    const metadata: Partial<Record<BrokerKey, BrokerMetadata>> = {};
+    for (const broker of ['fubon', 'nova', 'esun'] as const) {
+        const creds = brokerCreds?.[broker];
+        if (creds) metadata[broker] = splitBrokerCreds(creds).metadata;
+    }
+    return metadata;
+}
+
+function persistedConfig(config: RuntimeConfig) {
+    return {
+        marketProvider: config.marketProvider,
+        fugleApiKey: config.fugleApiKey,
+        tradeProvider: config.tradeProvider,
+        defaultTradeBroker: config.defaultTradeBroker,
+        brokerMetadata: config.brokerMetadata,
+    };
 }

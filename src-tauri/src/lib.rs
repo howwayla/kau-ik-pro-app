@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -12,6 +14,382 @@ use tauri_plugin_shell::{
 // Holds the spawned Node server sidecar so it can be killed on app exit.
 struct NovaServer(Mutex<Option<CommandChild>>);
 
+const SECURE_STORAGE_SPIKE_SERVICE: &str = "io.github.howwayla.kauikpro.secure-storage-spike";
+const SECURE_STORAGE_SPIKE_ACCOUNT: &str = "roundtrip-test";
+const SECURE_STORAGE_SPIKE_VALUE: &str = "kau-ik-pro-spike-value-v1";
+const BROKER_SECRET_SERVICE: &str = "io.github.howwayla.kauikpro.broker-secrets";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureStorageSpikeResult {
+    ok: bool,
+    present: bool,
+    value_matches: Option<bool>,
+    error: Option<String>,
+}
+
+impl SecureStorageSpikeResult {
+    fn ok(present: bool, value_matches: Option<bool>) -> Self {
+        Self {
+            ok: true,
+            present,
+            value_matches,
+            error: None,
+        }
+    }
+
+    fn error(err: keyring::Error) -> Self {
+        Self {
+            ok: false,
+            present: false,
+            value_matches: None,
+            error: Some(err.to_string()),
+        }
+    }
+}
+
+fn secure_storage_spike_entry() -> Result<keyring::Entry, keyring::Error> {
+    keyring::Entry::new(SECURE_STORAGE_SPIKE_SERVICE, SECURE_STORAGE_SPIKE_ACCOUNT)
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSecrets {
+    id_no: String,
+    password: String,
+    api_key: String,
+    api_secret: String,
+    cert_pass: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSecretMetadata {
+    cert_path: String,
+    api_url: String,
+}
+
+#[derive(Serialize)]
+struct BrokerSecretLoginRequest<'a> {
+    provider: &'a str,
+    id_no: &'a str,
+    password: &'a str,
+    api_key: &'a str,
+    api_secret: &'a str,
+    cert_path: &'a str,
+    cert_pass: &'a str,
+    api_url: &'a str,
+    persist_metadata: bool,
+}
+
+#[derive(Deserialize)]
+struct BrokerSecretLoginServerOk {
+    provider: String,
+    market: String,
+    warning: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BrokerSecretLoginServerError {
+    detail: Option<String>,
+    message: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSecretLoginResult {
+    ok: bool,
+    provider: Option<String>,
+    market: Option<String>,
+    warning: Option<String>,
+    error: Option<String>,
+}
+
+impl BrokerSecretLoginResult {
+    fn ok(result: BrokerSecretLoginServerOk) -> Self {
+        Self {
+            ok: true,
+            provider: Some(result.provider),
+            market: Some(result.market),
+            warning: result.warning,
+            error: None,
+        }
+    }
+
+    fn error(error: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            provider: None,
+            market: None,
+            warning: None,
+            error: Some(error.into()),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSecretCommandResult {
+    ok: bool,
+    present: bool,
+    error: Option<String>,
+}
+
+impl BrokerSecretCommandResult {
+    fn ok(present: bool) -> Self {
+        Self {
+            ok: true,
+            present,
+            error: None,
+        }
+    }
+
+    fn error(error: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            present: false,
+            error: Some(error.into()),
+        }
+    }
+}
+
+fn broker_secret_account(broker: &str) -> Result<&'static str, String> {
+    match broker {
+        "fubon" => Ok("fubon:v1"),
+        "nova" => Ok("nova:v1"),
+        "esun" => Ok("esun:v1"),
+        _ => Err("unsupported broker".to_string()),
+    }
+}
+
+fn broker_secret_entry(broker: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(BROKER_SECRET_SERVICE, broker_secret_account(broker)?)
+        .map_err(|err| err.to_string())
+}
+
+fn broker_secrets_to_json(secrets: &BrokerSecrets) -> Result<String, serde_json::Error> {
+    serde_json::to_string(secrets)
+}
+
+fn broker_secrets_from_json(json: &str) -> Result<BrokerSecrets, serde_json::Error> {
+    serde_json::from_str(json)
+}
+
+fn broker_secret_login_request<'a>(
+    broker: &'a str,
+    metadata: &'a BrokerSecretMetadata,
+    secrets: &'a BrokerSecrets,
+) -> BrokerSecretLoginRequest<'a> {
+    BrokerSecretLoginRequest {
+        provider: broker,
+        id_no: &secrets.id_no,
+        password: &secrets.password,
+        api_key: &secrets.api_key,
+        api_secret: &secrets.api_secret,
+        cert_path: &metadata.cert_path,
+        cert_pass: &secrets.cert_pass,
+        api_url: &metadata.api_url,
+        persist_metadata: false,
+    }
+}
+
+pub fn broker_secret_save_result(
+    broker: &str,
+    secrets: BrokerSecrets,
+) -> BrokerSecretCommandResult {
+    let entry = match broker_secret_entry(broker) {
+        Ok(entry) => entry,
+        Err(err) => return BrokerSecretCommandResult::error(err),
+    };
+    let json = match broker_secrets_to_json(&secrets) {
+        Ok(json) => json,
+        Err(err) => return BrokerSecretCommandResult::error(err.to_string()),
+    };
+    match entry.set_password(&json) {
+        Ok(()) => BrokerSecretCommandResult::ok(true),
+        Err(err) => BrokerSecretCommandResult::error(err.to_string()),
+    }
+}
+
+pub fn broker_secret_status_result(broker: &str) -> BrokerSecretCommandResult {
+    let entry = match broker_secret_entry(broker) {
+        Ok(entry) => entry,
+        Err(err) => return BrokerSecretCommandResult::error(err),
+    };
+    match entry.get_password() {
+        Ok(_) => BrokerSecretCommandResult::ok(true),
+        Err(keyring::Error::NoEntry) => BrokerSecretCommandResult::ok(false),
+        Err(err) => BrokerSecretCommandResult::error(err.to_string()),
+    }
+}
+
+pub fn broker_secret_load_result(broker: &str) -> Result<Option<BrokerSecrets>, String> {
+    let entry = broker_secret_entry(broker)?;
+    match entry.get_password() {
+        Ok(json) => broker_secrets_from_json(&json)
+            .map(Some)
+            .map_err(|err| err.to_string()),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+pub fn broker_secret_delete_result(broker: &str) -> BrokerSecretCommandResult {
+    let entry = match broker_secret_entry(broker) {
+        Ok(entry) => entry,
+        Err(err) => return BrokerSecretCommandResult::error(err),
+    };
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => BrokerSecretCommandResult::ok(false),
+        Err(err) => BrokerSecretCommandResult::error(err.to_string()),
+    }
+}
+
+pub async fn broker_secret_login_result(
+    broker: String,
+    metadata: BrokerSecretMetadata,
+) -> BrokerSecretLoginResult {
+    if let Err(err) = broker_secret_account(&broker) {
+        return BrokerSecretLoginResult::error(err);
+    }
+    if metadata.cert_path.trim().is_empty() {
+        return BrokerSecretLoginResult::error("缺少憑證路徑");
+    }
+    let secrets = match broker_secret_load_result(&broker) {
+        Ok(Some(secrets)) => secrets,
+        Ok(None) => {
+            return BrokerSecretLoginResult::error(
+                "尚未在系統安全儲存中找到這家券商的登入資訊",
+            );
+        }
+        Err(err) => return BrokerSecretLoginResult::error(err),
+    };
+    let request = broker_secret_login_request(&broker, &metadata, &secrets);
+    let response = match reqwest::Client::new()
+        .post("http://127.0.0.1:8080/api/v1/config/trade")
+        .json(&request)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => return BrokerSecretLoginResult::error(err.to_string()),
+    };
+    let status = response.status();
+    let text = match response.text().await {
+        Ok(text) => text,
+        Err(err) => return BrokerSecretLoginResult::error(err.to_string()),
+    };
+    if !status.is_success() {
+        let detail = serde_json::from_str::<BrokerSecretLoginServerError>(&text)
+            .ok()
+            .and_then(|body| body.detail.or(body.message))
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or_else(|| format!("本機服務回應 {status}"));
+        return BrokerSecretLoginResult::error(detail);
+    }
+    match serde_json::from_str::<BrokerSecretLoginServerOk>(&text) {
+        Ok(result) => BrokerSecretLoginResult::ok(result),
+        Err(err) => BrokerSecretLoginResult::error(err.to_string()),
+    }
+}
+
+pub fn secure_storage_spike_write_result() -> SecureStorageSpikeResult {
+    let entry = match secure_storage_spike_entry() {
+        Ok(entry) => entry,
+        Err(err) => return SecureStorageSpikeResult::error(err),
+    };
+    match entry.set_password(SECURE_STORAGE_SPIKE_VALUE) {
+        Ok(()) => SecureStorageSpikeResult::ok(true, None),
+        Err(err) => SecureStorageSpikeResult::error(err),
+    }
+}
+
+pub fn secure_storage_spike_read_result() -> SecureStorageSpikeResult {
+    let entry = match secure_storage_spike_entry() {
+        Ok(entry) => entry,
+        Err(err) => return SecureStorageSpikeResult::error(err),
+    };
+    match entry.get_password() {
+        Ok(value) => SecureStorageSpikeResult::ok(true, Some(value == SECURE_STORAGE_SPIKE_VALUE)),
+        Err(keyring::Error::NoEntry) => SecureStorageSpikeResult::ok(false, Some(false)),
+        Err(err) => SecureStorageSpikeResult::error(err),
+    }
+}
+
+pub fn secure_storage_spike_delete_result() -> SecureStorageSpikeResult {
+    let entry = match secure_storage_spike_entry() {
+        Ok(entry) => entry,
+        Err(err) => return SecureStorageSpikeResult::error(err),
+    };
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => SecureStorageSpikeResult::ok(false, None),
+        Err(err) => SecureStorageSpikeResult::error(err),
+    }
+}
+
+pub fn run_secure_storage_spike_cli(action: &str) -> i32 {
+    let result = match action {
+        "write" => secure_storage_spike_write_result(),
+        "read" => secure_storage_spike_read_result(),
+        "delete" => secure_storage_spike_delete_result(),
+        _ => SecureStorageSpikeResult {
+            ok: false,
+            present: false,
+            value_matches: None,
+            error: Some("unsupported secure storage spike action".to_string()),
+        },
+    };
+
+    match serde_json::to_string(&result) {
+        Ok(json) => println!("{json}"),
+        Err(err) => eprintln!("failed to serialize secure storage spike result: {err}"),
+    }
+
+    if result.ok {
+        0
+    } else {
+        1
+    }
+}
+
+#[tauri::command]
+fn secure_storage_spike_write() -> SecureStorageSpikeResult {
+    secure_storage_spike_write_result()
+}
+
+#[tauri::command]
+fn secure_storage_spike_read() -> SecureStorageSpikeResult {
+    secure_storage_spike_read_result()
+}
+
+#[tauri::command]
+fn secure_storage_spike_delete() -> SecureStorageSpikeResult {
+    secure_storage_spike_delete_result()
+}
+
+#[tauri::command]
+fn broker_secret_save(broker: String, secrets: BrokerSecrets) -> BrokerSecretCommandResult {
+    broker_secret_save_result(&broker, secrets)
+}
+
+#[tauri::command]
+fn broker_secret_status(broker: String) -> BrokerSecretCommandResult {
+    broker_secret_status_result(&broker)
+}
+
+#[tauri::command]
+fn broker_secret_delete(broker: String) -> BrokerSecretCommandResult {
+    broker_secret_delete_result(&broker)
+}
+
+#[tauri::command]
+async fn broker_secret_login(
+    broker: String,
+    metadata: BrokerSecretMetadata,
+) -> BrokerSecretLoginResult {
+    broker_secret_login_result(broker, metadata).await
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
@@ -23,9 +401,12 @@ fn show_main(app: &AppHandle) {
 // Spawn the bundled `nova-server` sidecar (the compiled Node/Fastify server)
 // on 127.0.0.1:8080 — the port the frontend targets in desktop mode
 // (see src/lib/runtime.ts getApiBase()).
-fn spawn_nova_server(app: &AppHandle) {
+fn spawn_nova_server(app: &AppHandle, data_dir: PathBuf) {
     let command = match app.shell().sidecar("nova-server") {
-        Ok(cmd) => cmd.env("HOST", "127.0.0.1").env("PORT", "8080"),
+        Ok(cmd) => cmd
+            .env("HOST", "127.0.0.1")
+            .env("PORT", "8080")
+            .env("KAUIK_DATA_DIR", data_dir.to_string_lossy().to_string()),
         Err(err) => {
             log::error!("failed to create nova-server sidecar: {err}");
             return;
@@ -71,14 +452,26 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        .invoke_handler(tauri::generate_handler![
+            secure_storage_spike_write,
+            secure_storage_spike_read,
+            secure_storage_spike_delete,
+            broker_secret_save,
+            broker_secret_status,
+            broker_secret_delete,
+            broker_secret_login
+        ])
         .setup(|app| {
             // ---- bundled Node server sidecar (auto-started; killed on exit) ----
-            spawn_nova_server(app.handle());
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
+            spawn_nova_server(app.handle(), data_dir);
 
             // ---- tray / menu-bar icon ----
             let show =
@@ -137,4 +530,71 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secure_storage_spike_uses_fixed_non_broker_identifiers() {
+        assert_eq!(
+            SECURE_STORAGE_SPIKE_SERVICE,
+            "io.github.howwayla.kauikpro.secure-storage-spike"
+        );
+        assert_eq!(SECURE_STORAGE_SPIKE_ACCOUNT, "roundtrip-test");
+        assert_eq!(SECURE_STORAGE_SPIKE_VALUE, "kau-ik-pro-spike-value-v1");
+    }
+
+    #[test]
+    fn broker_secret_accounts_are_fixed_for_supported_brokers() {
+        assert_eq!(broker_secret_account("fubon").unwrap(), "fubon:v1");
+        assert_eq!(broker_secret_account("nova").unwrap(), "nova:v1");
+        assert_eq!(broker_secret_account("esun").unwrap(), "esun:v1");
+        assert!(broker_secret_account("sinopac").is_err());
+    }
+
+    #[test]
+    fn broker_secret_payload_roundtrips_without_metadata_fields() {
+        let secrets = BrokerSecrets {
+            id_no: "A123456789".to_string(),
+            password: "account-pass".to_string(),
+            api_key: "api-key".to_string(),
+            api_secret: "api-secret".to_string(),
+            cert_pass: "cert-pass".to_string(),
+        };
+
+        let json = broker_secrets_to_json(&secrets).unwrap();
+
+        assert!(json.contains("\"idNo\""));
+        assert!(json.contains("\"certPass\""));
+        assert!(!json.contains("certPath"));
+        assert!(!json.contains("apiUrl"));
+        assert_eq!(broker_secrets_from_json(&json).unwrap(), secrets);
+    }
+
+    #[test]
+    fn broker_secret_login_request_uses_metadata_and_saved_secrets() {
+        let secrets = BrokerSecrets {
+            id_no: "A123456789".to_string(),
+            password: "account-pass".to_string(),
+            api_key: "api-key".to_string(),
+            api_secret: "api-secret".to_string(),
+            cert_pass: "cert-pass".to_string(),
+        };
+        let metadata = BrokerSecretMetadata {
+            cert_path: "/private/certs/nova.p12".to_string(),
+            api_url: "https://broker.example.test".to_string(),
+        };
+
+        let request = broker_secret_login_request("nova", &metadata, &secrets);
+        let json = serde_json::to_string(&request).unwrap();
+
+        assert!(json.contains("\"provider\":\"nova\""));
+        assert!(json.contains("\"id_no\":\"A123456789\""));
+        assert!(json.contains("\"cert_path\":\"/private/certs/nova.p12\""));
+        assert!(json.contains("\"persist_metadata\":false"));
+        assert!(!json.contains("certPath"));
+        assert!(!json.contains("certPass"));
+    }
 }

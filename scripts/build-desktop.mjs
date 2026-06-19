@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { resolveTarget, parseHostTripleFromRustcVV } from './desktop-targets.mjs';
 import { preflight, systemDepsHint } from './preflight.mjs';
+import { runWithStaleTauriCacheRetry } from './build-desktop-retry.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN_DIR = resolve(repoRoot, 'src-tauri/binaries');
@@ -43,6 +44,28 @@ function run(cmd, cmdArgs, opts = {}) {
     die(r.error.code === 'ENOENT' ? `\`${cmd}\` not found on PATH — is it installed?` : `could not run \`${cmd}\`: ${r.error.message}`);
   }
   if (r.status !== 0) die(`\`${cmd} ${cmdArgs.join(' ')}\` failed (exit ${r.status ?? r.signal}).`);
+}
+
+function runCaptured(cmd, cmdArgs, opts = {}) {
+  const r = spawnSync(cmd, cmdArgs, {
+    stdio: ['inherit', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    cwd: repoRoot,
+    shell: isWin,
+    maxBuffer: 50 * 1024 * 1024,
+    ...opts,
+  });
+  if (r.stdout) process.stdout.write(r.stdout);
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.error) {
+    die(r.error.code === 'ENOENT' ? `\`${cmd}\` not found on PATH — is it installed?` : `could not run \`${cmd}\`: ${r.error.message}`);
+  }
+  return {
+    status: r.status ?? 1,
+    signal: r.signal,
+    output: `${r.stdout ?? ''}${r.stderr ?? ''}`,
+    command: `${cmd} ${cmdArgs.join(' ')}`,
+  };
 }
 
 function detectHostTriple() {
@@ -136,7 +159,13 @@ console.log(
   `\n[2/2] ${dev ? 'starting Tauri dev window' : 'bundling the desktop app'} (\`tauri ${tauriCmd}\`)` +
     `${dev ? '' : ' — Rust release build, this takes several minutes; do not interrupt'}…\n`,
 );
-run('pnpm', ['exec', 'tauri', tauriCmd, ...extraArgs]);
+const tauriResult = runWithStaleTauriCacheRetry({
+  runTauri: () => runCaptured('pnpm', ['exec', 'tauri', tauriCmd, ...extraArgs]),
+  cleanCargo: () => runCaptured('cargo', ['clean', '--manifest-path', 'src-tauri/Cargo.toml']),
+});
+if (tauriResult.status !== 0) {
+  die(`\`${tauriResult.command}\` failed (exit ${tauriResult.status ?? tauriResult.signal}).`);
+}
 
 if (!dev) {
   console.log(

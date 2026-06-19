@@ -14,6 +14,7 @@
     "core:event:default",
     "store:default",
     "notification:default",
+    "dialog:allow-open",
     "process:default",
     "process:allow-restart",
     "shell:allow-open",

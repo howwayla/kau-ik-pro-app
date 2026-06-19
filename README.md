@@ -235,6 +235,11 @@ sudo apt update && sudo apt install -y libwebkit2gtk-4.1-dev \
 [`AGENTS.md`](AGENTS.md) 的疑難排解表（依錯誤訊息查對應解法）——
 該檔也是給 AI 助手讀的，讓它能直接幫你把卡住的環境救回來。
 
+如果錯誤是 `failed to read plugin permissions`，且路徑指向舊的
+`src-tauri/target`，代表搬移或改名專案後留下了 Tauri/Rust 快取；
+`pnpm desktop:build` 會自動 `cargo clean --manifest-path src-tauri/Cargo.toml`
+並重試一次。若你是手動跑 Tauri，先執行同一個 clean 指令再重跑。
+
 ## Safety notes 安全提醒與免責聲明
 
 - 預設為**模擬環境**；頂部會顯示「模擬環境」徽章，正式環境為紅色「正式環境」

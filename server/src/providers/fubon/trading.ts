@@ -25,6 +25,7 @@ import type {
     Trade,
 } from '../../types/dto.ts';
 import type { Config } from '../../config.ts';
+import { brokerLoginSuccessMessage } from '../logging.ts';
 import type { ContractKey, MarketClientSource } from '../market-data.ts';
 import {
     ConditionOrderError,
@@ -136,12 +137,11 @@ export class FubonTradingProvider implements TradingProvider {
         this.sdk.setOnFutoptFilled((err, fill) => {
             if (!err && fill) this.emitFutFill(fill);
         });
-        console.log(
-            `fubon: 登入成功 證券 ${this.stockAccount?.branchNo}-${this.stockAccount?.account}` +
-                (this.futAccount
-                    ? `, 期貨 ${this.futAccount.branchNo}-${this.futAccount.account}`
-                    : ''),
-        );
+        const availableTypes = [
+            this.stockAccount ? '證券' : '',
+            this.futAccount ? '期貨' : '',
+        ];
+        console.log(brokerLoginSuccessMessage('fubon', availableTypes));
     }
 
     // 委託主動回報沒有獨立的「新單/刪單/改單」事件型別 — 從 status 與
