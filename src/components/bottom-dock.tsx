@@ -20,6 +20,7 @@ import type {
 } from '../lib/types/portfolio';
 import {
     compareNullable,
+    createOrderTimeDescendingCompare,
     loadSortState,
     saveSortState,
     stableSort,
@@ -43,6 +44,7 @@ import { ResolvedSymbolCell } from './symbol-cell';
 type TabKey = 'positions' | 'orders' | 'account';
 
 const POSITIONS_SORT_STORAGE_KEY = 'kau-ik-pro-positions-sort';
+const ORDERS_SORT_STORAGE_KEY = 'kau-ik-pro-orders-sort';
 const POSITION_SORT_KEYS = [
     'symbol',
     'direction',
@@ -52,6 +54,15 @@ const POSITION_SORT_KEYS = [
     'pnl',
 ] as const;
 type PositionSortKey = (typeof POSITION_SORT_KEYS)[number];
+const ORDER_SORT_KEYS = [
+    'symbol',
+    'action',
+    'price',
+    'quantity',
+    'status',
+    'time',
+] as const;
+type OrderSortKey = (typeof ORDER_SORT_KEYS)[number];
 
 const POSITION_SORT_DEFAULT_DIRECTIONS: Record<
     PositionSortKey,
@@ -65,10 +76,26 @@ const POSITION_SORT_DEFAULT_DIRECTIONS: Record<
     pnl: 'desc',
 };
 
+const ORDER_SORT_DEFAULT_DIRECTIONS: Record<OrderSortKey, SortDirection> = {
+    symbol: 'asc',
+    action: 'asc',
+    price: 'desc',
+    quantity: 'desc',
+    status: 'asc',
+    time: 'desc',
+};
+
 interface PositionDisplayRow {
     position: Position;
     contract?: ContractInfo;
     displayPrice: ReturnType<typeof resolveDisplayPrice>;
+}
+
+interface OrderDisplayRow {
+    trade: Trade;
+    fallbackRank: number;
+    orderTs?: number | null;
+    effectivePrice: number;
 }
 
 const ACTIVE_STATUSES = new Set([
@@ -101,6 +128,21 @@ function loadPositionsSortState(): SortState<PositionSortKey> | null {
         POSITIONS_SORT_STORAGE_KEY,
         POSITION_SORT_KEYS,
     );
+}
+
+function getOrdersSortStorage(): Storage | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        return window.localStorage;
+    } catch {
+        return null;
+    }
+}
+
+function loadOrdersSortState(): SortState<OrderSortKey> | null {
+    const storage = getOrdersSortStorage();
+    if (!storage) return null;
+    return loadSortState(storage, ORDERS_SORT_STORAGE_KEY, ORDER_SORT_KEYS);
 }
 
 function comparePositionRows(
@@ -151,17 +193,79 @@ function comparePositionRows(
     return compareNullable(a.position.pnl, b.position.pnl, direction);
 }
 
-function sortAriaValue(
-    key: PositionSortKey,
-    sortState: SortState<PositionSortKey> | null,
+function compareOrderRows(
+    a: OrderDisplayRow,
+    b: OrderDisplayRow,
+    sort: SortState<OrderSortKey>,
+    timeDescCompare: (a: OrderDisplayRow, b: OrderDisplayRow) => number,
+): number {
+    const direction = sort.direction;
+
+    if (sort.key === 'symbol') {
+        const codeResult = compareNullable(
+            a.trade.contract.code,
+            b.trade.contract.code,
+            direction,
+        );
+        if (codeResult !== 0) return codeResult;
+        return compareNullable(
+            a.trade.contract.name,
+            b.trade.contract.name,
+            direction,
+        );
+    }
+
+    if (sort.key === 'action') {
+        return compareNullable(
+            a.trade.order.action === 'Buy' ? 0 : 1,
+            b.trade.order.action === 'Buy' ? 0 : 1,
+            direction,
+        );
+    }
+
+    if (sort.key === 'price') {
+        return compareNullable(a.effectivePrice, b.effectivePrice, direction);
+    }
+
+    if (sort.key === 'quantity') {
+        return compareNullable(
+            a.trade.order.quantity,
+            b.trade.order.quantity,
+            direction,
+        );
+    }
+
+    if (sort.key === 'status') {
+        return compareNullable(
+            a.trade.status.status,
+            b.trade.status.status,
+            direction,
+        );
+    }
+
+    return direction === 'desc'
+        ? timeDescCompare(a, b)
+        : -timeDescCompare(a, b);
+}
+
+function fmtOrderTime(orderTs?: number | null): string {
+    if (orderTs == null) return '—';
+    const date = new Date(Number(orderTs));
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleTimeString('zh-TW', { hour12: false });
+}
+
+function sortAriaValue<Key extends string>(
+    key: Key,
+    sortState: SortState<Key> | null,
 ): 'ascending' | 'descending' | 'none' {
     if (sortState?.key !== key) return 'none';
     return sortState.direction === 'asc' ? 'ascending' : 'descending';
 }
 
-function sortIndicator(
-    key: PositionSortKey,
-    sortState: SortState<PositionSortKey> | null,
+function sortIndicator<Key extends string>(
+    key: Key,
+    sortState: SortState<Key> | null,
 ): string {
     if (sortState?.key !== key) return '↕';
     return sortState.direction === 'asc' ? '▲' : '▼';
@@ -455,6 +559,79 @@ function OrdersTable({
     onChanged: () => void;
 }) {
     const [cancelling, setCancelling] = useState<string | null>(null);
+    const [sortState, setSortState] = useState<SortState<OrderSortKey> | null>(
+        loadOrdersSortState,
+    );
+    const orderRows = useMemo<OrderDisplayRow[]>(
+        () =>
+            trades.map((trade, originalIndex) => ({
+                trade,
+                fallbackRank: trades.length - 1 - originalIndex,
+                orderTs: trade.status.order_ts,
+                effectivePrice:
+                    trade.status.modified_price || trade.order.price,
+            })),
+        [trades],
+    );
+    const sortedRows = useMemo(() => {
+        if (!sortState) {
+            return stableSort(
+                orderRows,
+                (a, b) => a.fallbackRank - b.fallbackRank,
+            );
+        }
+        const timeDescCompare = createOrderTimeDescendingCompare(orderRows);
+        return stableSort(orderRows, (a, b) =>
+            compareOrderRows(a, b, sortState, timeDescCompare),
+        );
+    }, [orderRows, sortState]);
+
+    useEffect(() => {
+        if (!sortState) return;
+        const storage = getOrdersSortStorage();
+        if (!storage) return;
+        try {
+            saveSortState(storage, ORDERS_SORT_STORAGE_KEY, sortState);
+        } catch {
+            // Ignore private browsing or disabled storage; sorting still works in-memory.
+        }
+    }, [sortState]);
+
+    const updateSort = (key: OrderSortKey) => {
+        setSortState((current) =>
+            toggleSort(current, key, ORDER_SORT_DEFAULT_DIRECTIONS[key]),
+        );
+    };
+
+    const sortableHeader = (key: OrderSortKey, label: string) => {
+        const active = sortState?.key === key;
+        const stateLabel = active
+            ? sortState.direction === 'asc'
+                ? '升冪'
+                : '降冪'
+            : '未排序';
+
+        return (
+            <th
+                scope='col'
+                className={styles.th}
+                aria-sort={sortAriaValue(key, sortState)}
+            >
+                <button
+                    type='button'
+                    className={styles.sortHeaderButton}
+                    aria-label={`${label}：${stateLabel}，點選排序`}
+                    onClick={() => updateSort(key)}
+                >
+                    <span>{label}</span>
+                    <span className={styles.sortIndicator} aria-hidden='true'>
+                        {sortIndicator(key, sortState)}
+                    </span>
+                </button>
+            </th>
+        );
+    };
+
     if (trades.length === 0) {
         return <div className={styles.emptyState}>NO ORDERS · 無委託</div>;
     }
@@ -473,31 +650,40 @@ function OrdersTable({
         <table className={styles.table}>
             <thead>
                 <tr>
-                    <th className={styles.th}>代碼</th>
-                    <th className={styles.th}>買賣</th>
-                    <th className={styles.th}>價格</th>
-                    <th className={styles.th}>委託量</th>
-                    <th className={styles.th}>成交量</th>
-                    <th className={styles.th}>狀態</th>
-                    <th className={styles.th}>訊息</th>
-                    <th className={styles.th} />
+                    {sortableHeader('symbol', '商品')}
+                    {sortableHeader('action', '買賣')}
+                    {sortableHeader('price', '價格')}
+                    {sortableHeader('quantity', '委託量')}
+                    <th scope='col' className={styles.th}>
+                        成交量
+                    </th>
+                    {sortableHeader('status', '狀態')}
+                    {sortableHeader('time', '時間')}
+                    <th scope='col' className={styles.th}>
+                        訊息
+                    </th>
+                    <th scope='col' className={styles.th} />
                 </tr>
             </thead>
             <tbody>
-                {[...trades].reverse().map((t) => {
+                {sortedRows.map(({ trade: t, effectivePrice }) => {
                     const st = t.status.status;
                     return (
                         <tr key={t.order.id}>
-                            <td className={styles.td}>{t.contract.code}</td>
+                            <td className={styles.td}>
+                                <ResolvedSymbolCell
+                                    code={t.contract.code}
+                                    type={t.contract.security_type}
+                                    fallbackName={t.contract.name}
+                                />
+                            </td>
                             <td
                                 className={`${styles.td} ${panel.dirText[t.order.action === 'Buy' ? 'up' : 'down']}`}
                             >
                                 {t.order.action === 'Buy' ? '買' : '賣'}
                             </td>
                             <td className={styles.td}>
-                                {fmtPrice(
-                                    t.status.modified_price || t.order.price,
-                                )}
+                                {fmtPrice(effectivePrice)}
                             </td>
                             <td className={`${styles.td} ${SENSITIVE}`}>
                                 {fmtInt(t.order.quantity)}
@@ -513,6 +699,9 @@ function OrdersTable({
                                 >
                                     {st}
                                 </span>
+                            </td>
+                            <td className={styles.td}>
+                                {fmtOrderTime(t.status.order_ts)}
                             </td>
                             <td
                                 className={styles.td}
