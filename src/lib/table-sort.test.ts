@@ -25,6 +25,10 @@ test('compareNullable pushes missing values last in ascending and descending', (
     assert.equal(compareNullable(1, undefined, 'asc'), -1);
     assert.equal(compareNullable(undefined, 1, 'desc'), 1);
     assert.equal(compareNullable(1, undefined, 'desc'), -1);
+    assert.equal(compareNullable(null, 1, 'asc'), 1);
+    assert.equal(compareNullable(1, null, 'asc'), -1);
+    assert.equal(compareNullable(null, 1, 'desc'), 1);
+    assert.equal(compareNullable(1, null, 'desc'), -1);
 });
 
 test('sort state round trips through storage only when key and direction are valid', () => {

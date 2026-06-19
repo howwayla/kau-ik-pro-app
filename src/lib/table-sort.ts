@@ -21,13 +21,13 @@ export function stableSort<T>(rows: readonly T[], compare: (a: T, b: T) => numbe
 }
 
 export function compareNullable(
-    a: number | string | undefined,
-    b: number | string | undefined,
+    a: number | string | null | undefined,
+    b: number | string | null | undefined,
     direction: SortDirection,
 ): number {
-    if (a === undefined && b === undefined) return 0;
-    if (a === undefined) return 1;
-    if (b === undefined) return -1;
+    if (a == null && b == null) return 0;
+    if (a == null) return 1;
+    if (b == null) return -1;
     const result =
         typeof a === 'number' && typeof b === 'number'
             ? a - b
