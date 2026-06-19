@@ -1,19 +1,32 @@
 // src/components/bottom-dock.tsx — positions / orders / account tabs
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePoll } from '../hooks/use-poll';
+import { usePositionMarketData } from '../hooks/use-position-market-data';
+import { useQuotes } from '../hooks/use-quotes';
 import { apiPost } from '../lib/api';
 import { ensureContract } from '../lib/contracts-cache';
+import { resolveDisplayPrice } from '../lib/display-price';
 import { closeOrReverse } from '../lib/position-actions';
 import { cancelOrder, updateOrderQty } from '../lib/backend';
 import { notify, placeQuickOrder } from '../lib/trade';
 import type { Trade } from '../lib/types/order';
+import type { ContractInfo } from '../lib/types/contract';
 import type {
     AccountBalance,
     Margin,
     Position,
     StockPosition,
 } from '../lib/types/portfolio';
+import {
+    compareNullable,
+    loadSortState,
+    saveSortState,
+    stableSort,
+    toggleSort,
+    type SortDirection,
+    type SortState,
+} from '../lib/table-sort';
 import { SENSITIVE } from '../lib/privacy';
 import { dateStrOffset } from '../lib/utils/kbars';
 import {
@@ -25,8 +38,38 @@ import {
 import { vars } from '../theme.css';
 import * as panel from './panel.css';
 import * as styles from './bottom-dock.css';
+import { ResolvedSymbolCell } from './symbol-cell';
 
 type TabKey = 'positions' | 'orders' | 'account';
+
+const POSITIONS_SORT_STORAGE_KEY = 'kau-ik-pro-positions-sort';
+const POSITION_SORT_KEYS = [
+    'symbol',
+    'direction',
+    'quantity',
+    'cost',
+    'currentPrice',
+    'pnl',
+] as const;
+type PositionSortKey = (typeof POSITION_SORT_KEYS)[number];
+
+const POSITION_SORT_DEFAULT_DIRECTIONS: Record<
+    PositionSortKey,
+    SortDirection
+> = {
+    symbol: 'asc',
+    direction: 'asc',
+    quantity: 'desc',
+    cost: 'desc',
+    currentPrice: 'desc',
+    pnl: 'desc',
+};
+
+interface PositionDisplayRow {
+    position: Position;
+    contract?: ContractInfo;
+    displayPrice: ReturnType<typeof resolveDisplayPrice>;
+}
 
 const ACTIVE_STATUSES = new Set([
     'PendingSubmit',
@@ -41,6 +84,89 @@ function statusKind(status: string): 'ok' | 'pending' | 'bad' {
     return 'bad';
 }
 
+function getPositionsSortStorage(): Storage | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        return window.localStorage;
+    } catch {
+        return null;
+    }
+}
+
+function loadPositionsSortState(): SortState<PositionSortKey> | null {
+    const storage = getPositionsSortStorage();
+    if (!storage) return null;
+    return loadSortState(
+        storage,
+        POSITIONS_SORT_STORAGE_KEY,
+        POSITION_SORT_KEYS,
+    );
+}
+
+function comparePositionRows(
+    a: PositionDisplayRow,
+    b: PositionDisplayRow,
+    sort: SortState<PositionSortKey>,
+): number {
+    const direction = sort.direction;
+
+    if (sort.key === 'symbol') {
+        const codeResult = compareNullable(
+            a.position.code,
+            b.position.code,
+            direction,
+        );
+        if (codeResult !== 0) return codeResult;
+        return compareNullable(a.contract?.name, b.contract?.name, direction);
+    }
+
+    if (sort.key === 'direction') {
+        return compareNullable(
+            a.position.direction === 'Buy' ? 0 : 1,
+            b.position.direction === 'Buy' ? 0 : 1,
+            direction,
+        );
+    }
+
+    if (sort.key === 'quantity') {
+        return compareNullable(
+            a.position.quantity,
+            b.position.quantity,
+            direction,
+        );
+    }
+
+    if (sort.key === 'cost') {
+        return compareNullable(a.position.price, b.position.price, direction);
+    }
+
+    if (sort.key === 'currentPrice') {
+        return compareNullable(
+            a.displayPrice.value,
+            b.displayPrice.value,
+            direction,
+        );
+    }
+
+    return compareNullable(a.position.pnl, b.position.pnl, direction);
+}
+
+function sortAriaValue(
+    key: PositionSortKey,
+    sortState: SortState<PositionSortKey> | null,
+): 'ascending' | 'descending' | 'none' {
+    if (sortState?.key !== key) return 'none';
+    return sortState.direction === 'asc' ? 'ascending' : 'descending';
+}
+
+function sortIndicator(
+    key: PositionSortKey,
+    sortState: SortState<PositionSortKey> | null,
+): string {
+    if (sortState?.key !== key) return '↕';
+    return sortState.direction === 'asc' ? '▲' : '▼';
+}
+
 function PositionsTable({
     positions,
     onChanged,
@@ -49,6 +175,89 @@ function PositionsTable({
     onChanged: () => void;
 }) {
     const [busyCode, setBusyCode] = useState<string | null>(null);
+    const [sortState, setSortState] = useState<SortState<PositionSortKey> | null>(
+        loadPositionsSortState,
+    );
+    const positionCodes = useMemo(
+        () => positions.map((position) => position.code),
+        [positions],
+    );
+    const quotes = useQuotes(positionCodes);
+    const { contracts, snapshots } = usePositionMarketData(positions);
+    const rows = useMemo<PositionDisplayRow[]>(
+        () =>
+            positions.map((position) => {
+                const quote = quotes[position.code];
+                const contract = contracts[position.code];
+                const snapshot = snapshots[position.code];
+                return {
+                    position,
+                    contract,
+                    displayPrice: resolveDisplayPrice({
+                        tickClose:
+                            quote?.tick?.close === undefined
+                                ? undefined
+                                : Number(quote.tick.close),
+                        snapshotClose: snapshot?.close,
+                        brokerLastPrice: position.last_price,
+                        reference: contract?.reference,
+                        previousClose: contract?.previous_close,
+                    }),
+                };
+            }),
+        [contracts, positions, quotes, snapshots],
+    );
+    const sortedRows = useMemo(() => {
+        if (!sortState) return rows;
+        return stableSort(rows, (a, b) => comparePositionRows(a, b, sortState));
+    }, [rows, sortState]);
+
+    useEffect(() => {
+        if (!sortState) return;
+        const storage = getPositionsSortStorage();
+        if (!storage) return;
+        try {
+            saveSortState(storage, POSITIONS_SORT_STORAGE_KEY, sortState);
+        } catch {
+            // Ignore private browsing or disabled storage; sorting still works in-memory.
+        }
+    }, [sortState]);
+
+    const updateSort = (key: PositionSortKey) => {
+        setSortState((current) =>
+            toggleSort(current, key, POSITION_SORT_DEFAULT_DIRECTIONS[key]),
+        );
+    };
+
+    const sortableHeader = (key: PositionSortKey, label: string) => {
+        const active = sortState?.key === key;
+        const stateLabel = active
+            ? sortState.direction === 'asc'
+                ? '升冪'
+                : '降冪'
+            : '未排序';
+
+        return (
+            <th
+                scope='col'
+                className={styles.th}
+                aria-sort={sortAriaValue(key, sortState)}
+            >
+                <button
+                    type='button'
+                    className={styles.sortHeaderButton}
+                    aria-label={`${label}：${stateLabel}，點選排序`}
+                    onClick={() => updateSort(key)}
+                >
+                    <span>{label}</span>
+                    <span className={styles.sortIndicator} aria-hidden='true'>
+                        {sortIndicator(key, sortState)}
+                    </span>
+                </button>
+            </th>
+        );
+    };
+
     const act = async (p: Position, mode: 'close' | 'reverse') => {
         if (busyCode) return;
         setBusyCode(p.code);
@@ -69,24 +278,35 @@ function PositionsTable({
         <table className={styles.table}>
             <thead>
                 <tr>
-                    <th className={styles.th}>代碼</th>
-                    <th className={styles.th}>方向</th>
-                    <th className={styles.th}>數量</th>
-                    <th className={styles.th}>成本</th>
-                    <th className={styles.th}>現價</th>
-                    <th className={styles.th}>損益</th>
-                    <th className={styles.th} style={{ width: '18%' }}>
+                    {sortableHeader('symbol', '商品')}
+                    {sortableHeader('direction', '方向')}
+                    {sortableHeader('quantity', '數量')}
+                    {sortableHeader('cost', '成本')}
+                    {sortableHeader('currentPrice', '現價')}
+                    {sortableHeader('pnl', '損益')}
+                    <th
+                        scope='col'
+                        className={styles.th}
+                        style={{ width: '18%' }}
+                    >
                         損益分布
                     </th>
-                    <th className={styles.th} />
+                    <th scope='col' className={styles.th} />
                 </tr>
             </thead>
             <tbody>
-                {positions.map((p) => {
+                {sortedRows.map((row) => {
+                    const p = row.position;
                     const dir = p.pnl > 0 ? 'up' : p.pnl < 0 ? 'down' : 'flat';
                     return (
                         <tr key={`${p.code}-${p.id}`}>
-                            <td className={styles.td}>{p.code}</td>
+                            <td className={styles.td}>
+                                <ResolvedSymbolCell
+                                    code={p.code}
+                                    type={row.contract?.security_type}
+                                    fallbackName={row.contract?.name}
+                                />
+                            </td>
                             <td
                                 className={`${styles.td} ${panel.dirText[p.direction === 'Buy' ? 'up' : 'down']}`}
                             >
@@ -98,8 +318,18 @@ function PositionsTable({
                             <td className={`${styles.td} ${SENSITIVE}`}>
                                 {fmtPrice(p.price)}
                             </td>
-                            <td className={styles.td}>
-                                {fmtPrice(p.last_price)}
+                            <td
+                                className={styles.td}
+                                title={row.displayPrice.title}
+                            >
+                                <span className={styles.priceWithSource}>
+                                    <span>
+                                        {fmtPrice(row.displayPrice.value)}
+                                    </span>
+                                    <span className={styles.priceSource}>
+                                        {row.displayPrice.label}
+                                    </span>
+                                </span>
                             </td>
                             <td
                                 className={`${styles.td} ${panel.dirText[dir]} ${SENSITIVE}`}
