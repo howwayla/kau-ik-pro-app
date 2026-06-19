@@ -35,19 +35,9 @@ export const row = styleVariants({
     ],
 });
 
-export const code = style({
-    fontFamily: vars.font.mono,
-    fontSize: '0.8rem',
-    fontWeight: 600,
-    color: vars.color.foreground,
-});
-
-export const name = style({
-    fontSize: '0.68rem',
-    color: vars.color.mutedForeground,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+export const symbolCell = style({
+    gridColumn: '1',
+    gridRow: '1 / span 2',
 });
 
 export const price = style({
@@ -147,41 +137,4 @@ export const typeSelect = style({
     border: `1px solid ${vars.color.border}`,
     borderRadius: vars.radius.sm,
     outline: 'none',
-});
-
-// 試撮 / 處置 / 注意 markers next to the code
-export const rowBadge = styleVariants({
-    trial: {
-        fontFamily: vars.font.display,
-        fontSize: '0.56rem',
-        fontWeight: 600,
-        color: vars.color.amber,
-        border: `1px solid ${vars.color.amber}`,
-        borderRadius: vars.radius.sm,
-        padding: '0 3px',
-        marginLeft: '4px',
-        verticalAlign: 'middle',
-    },
-    punish: {
-        fontFamily: vars.font.display,
-        fontSize: '0.56rem',
-        fontWeight: 600,
-        color: '#ff5d5d',
-        border: '1px solid #ff5d5d',
-        borderRadius: vars.radius.sm,
-        padding: '0 3px',
-        marginLeft: '4px',
-        verticalAlign: 'middle',
-    },
-    attention: {
-        fontFamily: vars.font.display,
-        fontSize: '0.56rem',
-        fontWeight: 600,
-        color: vars.color.amber,
-        border: `1px solid ${vars.color.amber}`,
-        borderRadius: vars.radius.sm,
-        padding: '0 3px',
-        marginLeft: '4px',
-        verticalAlign: 'middle',
-    },
 });
