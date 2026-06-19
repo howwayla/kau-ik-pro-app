@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { summarizeStockPositions } from './portfolio-summary';
+import {
+    formatMissingPriceCountHint,
+    summarizeStockPositions,
+} from './portfolio-summary';
+import { resolveDisplayPrice } from './display-price';
 import type { DisplayPrice } from './display-price';
 
 const price = (
@@ -53,4 +57,41 @@ test('excludes only positions with no display price', () => {
     assert.equal(summary.totalMarketValue, 0);
     assert.equal(summary.todayUnrealized, 0);
     assert.equal(summary.missingPriceCount, 1);
+});
+
+test('keeps resolved fallback prices when broker last_price is zero and reports missing exclusions', () => {
+    const summary = summarizeStockPositions([
+        {
+            code: '2330',
+            quantity: 2,
+            averagePrice: 500,
+            pnl: 1200,
+            reference: 490,
+            displayPrice: resolveDisplayPrice({
+                brokerLastPrice: 0,
+                reference: 510,
+            }),
+        },
+        {
+            code: '2317',
+            quantity: 1,
+            averagePrice: 100,
+            pnl: -100,
+            reference: 98,
+            displayPrice: resolveDisplayPrice({
+                brokerLastPrice: 0,
+                reference: 0,
+                previousClose: 0,
+            }),
+        },
+    ]);
+
+    assert.equal(summary.totalMarketValue, 1_020_000);
+    assert.equal(summary.todayUnrealized, 40_000);
+    assert.equal(summary.missingPriceCount, 1);
+    assert.equal(
+        formatMissingPriceCountHint(summary.missingPriceCount),
+        '有 1 筆部位因缺少價格未納入',
+    );
+    assert.equal(formatMissingPriceCountHint(0), '');
 });

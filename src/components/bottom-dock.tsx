@@ -5,8 +5,11 @@ import { usePoll } from '../hooks/use-poll';
 import { usePositionMarketData } from '../hooks/use-position-market-data';
 import { useQuotes } from '../hooks/use-quotes';
 import { apiPost } from '../lib/api';
-import { ensureContract } from '../lib/contracts-cache';
 import { resolveDisplayPrice } from '../lib/display-price';
+import {
+    formatMissingPriceCountHint,
+    summarizeStockPositions,
+} from '../lib/portfolio-summary';
 import { closeOrReverse } from '../lib/position-actions';
 import { cancelOrder, updateOrderQty } from '../lib/backend';
 import { notify, placeQuickOrder } from '../lib/trade';
@@ -754,36 +757,17 @@ function AccountView({
     balance?: AccountBalance;
     margin?: Margin;
 }) {
-    const stockPos = positions.filter(
-        (p): p is StockPosition => 'yd_quantity' in p,
+    const stockPos = useMemo(
+        () =>
+            positions.filter((p): p is StockPosition => 'yd_quantity' in p),
+        [positions],
     );
-
-    // 今日未實現變化的基準＝「今日參考價」：除權息日參考價已調整股息，
-    // 算出來的是市場真實漲跌（除息缺口不計為虧損 — 股息另行入帳）。
-    // 若想對齊以昨收為基準的券商 app 口徑，改用 c.previous_close 即可。
-    const codesKey = stockPos.map((p) => p.code).join(',');
-    const [refs, setRefs] = useState<Record<string, number>>({});
-    useEffect(() => {
-        let alive = true;
-        for (const p of stockPos) {
-            if (refs[p.code]) continue;
-            ensureContract(p.code)
-                .then((c) => {
-                    if (alive && c.reference > 0) {
-                        setRefs((prev) =>
-                            prev[p.code] === c.reference
-                                ? prev
-                                : { ...prev, [p.code]: c.reference },
-                        );
-                    }
-                })
-                .catch(() => undefined);
-        }
-        return () => {
-            alive = false;
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [codesKey]);
+    const stockCodes = useMemo(
+        () => stockPos.map((position) => position.code),
+        [stockPos],
+    );
+    const quotes = useQuotes(stockCodes);
+    const { contracts, snapshots } = usePositionMarketData(stockPos);
 
     // 今日已實現損益（60 秒輪詢 — 玉山帳務 API 有嚴格速率限制）
     const realizedPoll = usePoll<number>(
@@ -804,23 +788,47 @@ function AccountView({
     );
     const todayRealized = realizedPoll.data ?? 0;
 
-    const totalPnl = stockPos.reduce((s, p) => s + p.pnl, 0);
-    const totalCost = stockPos.reduce(
-        (s, p) => s + p.price * p.quantity * 1000,
-        0,
+    const stockSummary = useMemo(
+        () =>
+            summarizeStockPositions(
+                stockPos.map((position) => {
+                    const quote = quotes[position.code];
+                    const contract = contracts[position.code];
+                    const snapshot = snapshots[position.code];
+                    return {
+                        code: position.code,
+                        quantity: position.quantity,
+                        averagePrice: position.price,
+                        pnl: position.pnl,
+                        reference: contract?.reference,
+                        displayPrice: resolveDisplayPrice({
+                            tickClose:
+                                quote?.tick?.close === undefined
+                                    ? undefined
+                                    : Number(quote.tick.close),
+                            snapshotClose: snapshot?.close,
+                            brokerLastPrice: position.last_price,
+                            reference: contract?.reference,
+                            previousClose: contract?.previous_close,
+                        }),
+                    };
+                }),
+            ),
+        [contracts, quotes, snapshots, stockPos],
     );
-    const totalMkt = stockPos.reduce(
-        (s, p) => s + (p.last_price > 0 ? p.last_price * p.quantity * 1000 : 0),
-        0,
-    );
-    const todayUnreal = stockPos.reduce((s, p) => {
-        const ref = refs[p.code];
-        return ref && p.last_price > 0
-            ? s + (p.last_price - ref) * p.quantity * 1000
-            : s;
-    }, 0);
+    const {
+        totalPnl,
+        totalCost,
+        totalMarketValue,
+        todayUnrealized,
+        missingPriceCount,
+    } = stockSummary;
+    const missingPriceHint = formatMissingPriceCountHint(missingPriceCount);
+    const appendMissingPriceHint = (hint: string) =>
+        missingPriceHint ? `${hint}；${missingPriceHint}` : hint;
+    const todayUnreal = todayUnrealized;
     const todayTotal = todayRealized + todayUnreal;
-    const ydMkt = totalMkt - todayUnreal; // 今日報酬率基準：昨日市值
+    const ydMkt = totalMarketValue - todayUnreal; // 今日報酬率基準：昨日市值
 
     const dirOf = (v: number): 'up' | 'down' | 'flat' =>
         v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
@@ -845,7 +853,9 @@ function AccountView({
                 label: '今日總損益（報酬率）',
                 value: withPct(todayTotal, ydMkt),
                 dir: dirOf(todayTotal),
-                hint: '今日已實現 + 今日未實現變化；報酬率以昨日市值為基準',
+                hint: appendMissingPriceHint(
+                    '今日已實現 + 今日未實現變化；報酬率以昨日市值為基準',
+                ),
             },
             {
                 label: '今日已實現損益',
@@ -857,12 +867,14 @@ function AccountView({
                 label: '今日未實現損益變化',
                 value: fmtSigned(todayUnreal, 0),
                 dir: dirOf(todayUnreal),
-                hint: 'Σ(現價 − 今日參考價) × 持股。以參考價為基準：除權息日已排除除息缺口，呈現市場真實漲跌（股息另計）；故與以昨收為基準的券商 app 在除權息日會有差異',
+                hint: appendMissingPriceHint(
+                    'Σ(現價 − 今日參考價) × 持股。以參考價為基準：除權息日已排除除息缺口，呈現市場真實漲跌（股息另計）；故與以昨收為基準的券商 app 在除權息日會有差異',
+                ),
             },
             {
                 label: '總市值 Market Value',
-                value: fmtMoney(totalMkt),
-                hint: 'Σ 現價 × 持股',
+                value: fmtMoney(totalMarketValue),
+                hint: appendMissingPriceHint('Σ 現價 × 持股'),
             },
         );
     }

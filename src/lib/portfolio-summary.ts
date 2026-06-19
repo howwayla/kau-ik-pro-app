@@ -47,3 +47,7 @@ export function summarizeStockPositions(
         },
     );
 }
+
+export function formatMissingPriceCountHint(count: number): string {
+    return count > 0 ? `有 ${count} 筆部位因缺少價格未納入` : '';
+}
