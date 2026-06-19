@@ -68,6 +68,37 @@ export const th = style({
     },
 });
 
+export const sortHeaderButton = style({
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    minHeight: '1.15rem',
+    padding: 0,
+    font: 'inherit',
+    letterSpacing: 'inherit',
+    color: 'inherit',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    ':hover': {
+        color: vars.color.foreground,
+    },
+    ':focus-visible': {
+        outline: `1px solid ${vars.color.accent}`,
+        outlineOffset: '2px',
+        borderRadius: vars.radius.sm,
+    },
+});
+
+export const sortIndicator = style({
+    display: 'inline-flex',
+    width: '0.8rem',
+    justifyContent: 'center',
+    fontSize: '0.56rem',
+    lineHeight: 1,
+    color: vars.color.mutedForeground,
+});
+
 export const td = style({
     textAlign: 'right',
     padding: `4px ${vars.space.sm}`,
@@ -75,6 +106,23 @@ export const td = style({
     selectors: {
         '&:first-child': { textAlign: 'left' },
     },
+});
+
+export const priceWithSource = style({
+    display: 'inline-flex',
+    alignItems: 'baseline',
+    gap: '6px',
+    whiteSpace: 'nowrap',
+});
+
+export const priceSource = style({
+    display: 'inline-block',
+    width: '2.6rem',
+    fontFamily: vars.font.display,
+    fontSize: '0.56rem',
+    lineHeight: 1,
+    color: vars.color.mutedForeground,
+    textAlign: 'left',
 });
 
 const chipBase = style({
