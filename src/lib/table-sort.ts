@@ -87,16 +87,18 @@ export function createMemorySortStorage(): SortStorage & {
 }
 
 export interface OrderTimeSortable {
-    orderTs?: number;
+    orderTs?: number | null;
     fallbackRank: number;
 }
 
-export function orderTimeDescendingCompare(
-    a: OrderTimeSortable,
-    b: OrderTimeSortable,
-): number {
-    if (a.orderTs !== undefined && b.orderTs !== undefined) {
-        return b.orderTs - a.orderTs;
-    }
-    return a.fallbackRank - b.fallbackRank;
+export function createOrderTimeDescendingCompare<T extends OrderTimeSortable>(
+    rows: readonly T[],
+): (a: T, b: T) => number {
+    const allHaveOrderTs = rows.every((row) => row.orderTs != null);
+    return (a, b) => {
+        if (allHaveOrderTs) {
+            return Number(b.orderTs) - Number(a.orderTs);
+        }
+        return a.fallbackRank - b.fallbackRank;
+    };
 }
