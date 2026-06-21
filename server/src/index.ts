@@ -10,6 +10,10 @@ import { join } from 'node:path';
 import { buildApp } from './app.ts';
 import { credsComplete, loadConfig } from './config.ts';
 import type { AppContext } from './context.ts';
+import {
+    legacyRuntimeConfigFiles,
+    migrateRuntimeConfig,
+} from './config-migration.ts';
 import { resolveServerDataDir } from './data-dir.ts';
 import {
     buildTradingProvider,
@@ -31,7 +35,12 @@ const dataDir = resolveServerDataDir();
 
 async function main(): Promise<void> {
     const config = loadConfig();
-    const runtimeConfig = new RuntimeConfigStore(join(dataDir, 'config.json'), {
+    const runtimeConfigFile = join(dataDir, 'config.json');
+    migrateRuntimeConfig({
+        targetFile: runtimeConfigFile,
+        legacyFiles: legacyRuntimeConfigFiles(runtimeConfigFile),
+    });
+    const runtimeConfig = new RuntimeConfigStore(runtimeConfigFile, {
         marketProvider: config.marketProvider,
         fugleApiKey: config.fugleApiKey,
     });
