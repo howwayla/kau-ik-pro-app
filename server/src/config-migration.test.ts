@@ -40,6 +40,11 @@ function readJson(filePath: string) {
     return JSON.parse(readFileSync(filePath, 'utf8'));
 }
 
+function assertOwnerOnlyMode(filePath: string) {
+    if (process.platform === 'win32') return;
+    assert.equal(statSync(filePath).mode & 0o777, 0o600);
+}
+
 await check('migrates broker metadata from legacy bundle-id config to canonical config', () => {
     const root = tempRoot();
     const target = join(root, 'Kau-ik Pro', 'config.json');
@@ -74,7 +79,7 @@ await check('migrates broker metadata from legacy bundle-id config to canonical 
         certPath: '/private/certs/esun.p12',
         apiUrl: 'https://esun.example.test',
     });
-    assert.equal(statSync(target).mode & 0o777, 0o600);
+    assertOwnerOnlyMode(target);
 });
 
 await check('derives metadata from legacy brokerCreds without persisting secrets', () => {
