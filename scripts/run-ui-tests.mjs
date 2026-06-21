@@ -48,6 +48,7 @@ console.log(`Running ${testFiles.length} frontend UI test ${label}.`);
 const tsxCommand = process.platform === 'win32' ? 'tsx.cmd' : 'tsx';
 const child = spawn(tsxCommand, ['--test', ...testFiles], {
     cwd: repoRoot,
+    shell: process.platform === 'win32',
     stdio: 'inherit',
 });
 
