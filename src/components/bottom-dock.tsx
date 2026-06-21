@@ -37,6 +37,7 @@ import { dateStrOffset } from '../lib/utils/kbars';
 import {
     fmtInt,
     fmtMoney,
+    fmtPct,
     fmtPrice,
     fmtSigned,
 } from '../lib/utils/format';
@@ -280,6 +281,17 @@ function fmtOrderTime(orderTs?: number | null): string {
     return date.toLocaleTimeString('zh-TW', { hour12: false });
 }
 
+function metricCellTitle(row: PositionDisplayRow): string | undefined {
+    return row.metrics.appliesToStock ? undefined : '僅股票/ETF 適用';
+}
+
+function returnRateDirection(
+    value: number | undefined,
+): 'up' | 'down' | 'flat' {
+    if (value === undefined || value === 0) return 'flat';
+    return value > 0 ? 'up' : 'down';
+}
+
 function sortAriaValue<Key extends string>(
     key: Key,
     sortState: SortState<Key> | null,
@@ -416,7 +428,9 @@ function PositionsTable({
                     {sortableHeader('quantity', '數量')}
                     {sortableHeader('cost', '成本')}
                     {sortableHeader('currentPrice', '現價')}
+                    {sortableHeader('marketValue', '市值')}
                     {sortableHeader('pnl', '損益')}
+                    {sortableHeader('returnRate', '報酬率')}
                     <th
                         scope='col'
                         className={styles.th}
@@ -465,9 +479,27 @@ function PositionsTable({
                                 </span>
                             </td>
                             <td
+                                className={`${styles.td} ${SENSITIVE}`}
+                                title={metricCellTitle(row)}
+                            >
+                                {fmtMoney(row.metrics.marketValue)}
+                            </td>
+                            <td
                                 className={`${styles.td} ${panel.dirText[dir]} ${SENSITIVE}`}
                             >
                                 {fmtSigned(p.pnl, 0)}
+                            </td>
+                            <td
+                                className={`${styles.td} ${
+                                    panel.dirText[
+                                        returnRateDirection(
+                                            row.metrics.unrealizedReturnRate,
+                                        )
+                                    ]
+                                } ${SENSITIVE}`}
+                                title={metricCellTitle(row)}
+                            >
+                                {fmtPct(row.metrics.unrealizedReturnRate)}
                             </td>
                             <td className={styles.td}>
                                 <div className={styles.pnlBar}>
