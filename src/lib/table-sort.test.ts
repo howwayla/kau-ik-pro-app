@@ -32,6 +32,47 @@ test('compareNullable pushes missing values last in ascending and descending', (
     assert.equal(compareNullable(1, null, 'desc'), -1);
 });
 
+test('stableSort with compareNullable sorts market values and keeps missing values last', () => {
+    const rows = [
+        { id: 'missing', marketValue: undefined },
+        { id: 'large', marketValue: 2_000_000 },
+        { id: 'small', marketValue: 100_000 },
+    ];
+
+    const ascending = stableSort(rows, (a, b) =>
+        compareNullable(a.marketValue, b.marketValue, 'asc'),
+    );
+    assert.deepEqual(ascending.map((row) => row.id), [
+        'small',
+        'large',
+        'missing',
+    ]);
+
+    const descending = stableSort(rows, (a, b) =>
+        compareNullable(a.marketValue, b.marketValue, 'desc'),
+    );
+    assert.deepEqual(descending.map((row) => row.id), [
+        'large',
+        'small',
+        'missing',
+    ]);
+});
+
+test('sort state accepts new position metric keys', () => {
+    const storage = createMemorySortStorage();
+    const allowed = ['marketValue', 'returnRate'] as const;
+
+    saveSortState(storage, 'kau-ik-pro-positions-sort', {
+        key: 'returnRate',
+        direction: 'desc',
+    });
+
+    assert.deepEqual(
+        loadSortState(storage, 'kau-ik-pro-positions-sort', allowed),
+        { key: 'returnRate', direction: 'desc' },
+    );
+});
+
 test('sort state round trips through storage only when key and direction are valid', () => {
     const storage = createMemorySortStorage();
     const allowed = ['symbol', 'pnl'] as const;

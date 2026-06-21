@@ -10,6 +10,7 @@ import {
     formatMissingPriceCountHint,
     summarizeStockPositions,
 } from '../lib/portfolio-summary';
+import { calculatePositionMetrics } from '../lib/position-metrics';
 import { closeOrReverse } from '../lib/position-actions';
 import { cancelOrder, updateOrderQty } from '../lib/backend';
 import { notify, placeQuickOrder } from '../lib/trade';
@@ -54,7 +55,9 @@ const POSITION_SORT_KEYS = [
     'quantity',
     'cost',
     'currentPrice',
+    'marketValue',
     'pnl',
+    'returnRate',
 ] as const;
 type PositionSortKey = (typeof POSITION_SORT_KEYS)[number];
 const ORDER_SORT_KEYS = [
@@ -76,7 +79,9 @@ const POSITION_SORT_DEFAULT_DIRECTIONS: Record<
     quantity: 'desc',
     cost: 'desc',
     currentPrice: 'desc',
+    marketValue: 'desc',
     pnl: 'desc',
+    returnRate: 'desc',
 };
 
 const ORDER_SORT_DEFAULT_DIRECTIONS: Record<OrderSortKey, SortDirection> = {
@@ -92,6 +97,7 @@ interface PositionDisplayRow {
     position: Position;
     contract?: ContractInfo;
     displayPrice: ReturnType<typeof resolveDisplayPrice>;
+    metrics: ReturnType<typeof calculatePositionMetrics>;
 }
 
 interface OrderDisplayRow {
@@ -193,7 +199,23 @@ function comparePositionRows(
         );
     }
 
-    return compareNullable(a.position.pnl, b.position.pnl, direction);
+    if (sort.key === 'marketValue') {
+        return compareNullable(
+            a.metrics.marketValue,
+            b.metrics.marketValue,
+            direction,
+        );
+    }
+
+    if (sort.key === 'pnl') {
+        return compareNullable(a.position.pnl, b.position.pnl, direction);
+    }
+
+    return compareNullable(
+        a.metrics.unrealizedReturnRate,
+        b.metrics.unrealizedReturnRate,
+        direction,
+    );
 }
 
 function compareOrderRows(
@@ -297,18 +319,22 @@ function PositionsTable({
                 const quote = quotes[position.code];
                 const contract = contracts[position.code];
                 const snapshot = snapshots[position.code];
+                const displayPrice = resolveDisplayPrice({
+                    tickClose:
+                        quote?.tick?.close === undefined
+                            ? undefined
+                            : Number(quote.tick.close),
+                    snapshotClose: snapshot?.close,
+                    brokerLastPrice: position.last_price,
+                    reference: contract?.reference,
+                    previousClose: contract?.previous_close,
+                });
                 return {
                     position,
                     contract,
-                    displayPrice: resolveDisplayPrice({
-                        tickClose:
-                            quote?.tick?.close === undefined
-                                ? undefined
-                                : Number(quote.tick.close),
-                        snapshotClose: snapshot?.close,
-                        brokerLastPrice: position.last_price,
-                        reference: contract?.reference,
-                        previousClose: contract?.previous_close,
+                    displayPrice,
+                    metrics: calculatePositionMetrics(position, {
+                        displayPriceValue: displayPrice.value,
                     }),
                 };
             }),
