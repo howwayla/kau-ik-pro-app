@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
     splitBrokerCreds,
     type BrokerMetadata,
@@ -7,6 +7,11 @@ import {
 import type { BrokerCreds, BrokerName, TradeProviderName } from './config.ts';
 
 type BrokerKey = BrokerName;
+
+const LEGACY_CONFIG_DIRS = [
+    'Kau-ik Pro',
+    'io.github.howwayla.kauikpro',
+] as const;
 
 interface RuntimeConfigJson {
     marketProvider?: 'mock' | 'fugle';
@@ -26,16 +31,12 @@ export interface RuntimeConfigMigrationResult {
 export function legacyRuntimeConfigFiles(targetFile: string): string[] {
     const dataDir = dirname(targetFile);
     const supportDir = dirname(dataDir);
-    const files: string[] = [];
+    const files = LEGACY_CONFIG_DIRS.flatMap((dir) => [
+        join(supportDir, dir, 'config.json'),
+        join(supportDir, dir, 'server', 'config.json'),
+    ]);
 
-    if (basename(dataDir) === 'Kau-ik Pro') {
-        files.push(
-            join(supportDir, 'io.github.howwayla.kauikpro', 'config.json'),
-            join(dataDir, 'server', 'config.json'),
-        );
-    }
-
-    return files.filter((file) => file !== targetFile);
+    return [...new Set(files)].filter((file) => file !== targetFile);
 }
 
 export function migrateRuntimeConfig({

@@ -14,6 +14,7 @@ export interface DisplayPrice {
 
 export interface ResolveDisplayPriceInput {
     tickClose?: number;
+    tickSimtrade?: boolean;
     snapshotClose?: number;
     brokerLastPrice?: number;
     reference?: number;
@@ -27,7 +28,7 @@ function positive(value: number | undefined): number | undefined {
 }
 
 export function resolveDisplayPrice(input: ResolveDisplayPriceInput): DisplayPrice {
-    const live = positive(input.tickClose);
+    const live = input.tickSimtrade ? undefined : positive(input.tickClose);
     if (live !== undefined) {
         return { value: live, source: 'live', label: '即時', title: '即時成交價' };
     }

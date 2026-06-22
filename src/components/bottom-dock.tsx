@@ -336,6 +336,7 @@ function PositionsTable({
                         quote?.tick?.close === undefined
                             ? undefined
                             : Number(quote.tick.close),
+                    tickSimtrade: quote?.tick?.simtrade,
                     snapshotClose: snapshot?.close,
                     brokerLastPrice: position.last_price,
                     reference: contract?.reference,
@@ -864,6 +865,7 @@ function AccountView({
                                 quote?.tick?.close === undefined
                                     ? undefined
                                     : Number(quote.tick.close),
+                            tickSimtrade: quote?.tick?.simtrade,
                             snapshotClose: snapshot?.close,
                             brokerLastPrice: position.last_price,
                             reference: contract?.reference,
@@ -879,6 +881,7 @@ function AccountView({
         totalCost,
         totalMarketValue,
         todayUnrealized,
+        todayBasisValue,
         missingPriceCount,
     } = stockSummary;
     const missingPriceHint = formatMissingPriceCountHint(missingPriceCount);
@@ -886,7 +889,7 @@ function AccountView({
         missingPriceHint ? `${hint}；${missingPriceHint}` : hint;
     const todayUnreal = todayUnrealized;
     const todayTotal = todayRealized + todayUnreal;
-    const ydMkt = totalMarketValue - todayUnreal; // 今日報酬率基準：昨日市值
+    const ydMkt = todayBasisValue; // 今日報酬率基準：有參考價部位的昨日市值
 
     const dirOf = (v: number): 'up' | 'down' | 'flat' =>
         v > 0 ? 'up' : v < 0 ? 'down' : 'flat';

@@ -20,6 +20,19 @@ test('uses live tick when it is positive', () => {
     );
 });
 
+test('ignores trial matching ticks as live prices', () => {
+    const price = resolveDisplayPrice({
+        tickClose: 101,
+        tickSimtrade: true,
+        snapshotClose: 99,
+        brokerLastPrice: 98,
+        reference: 97,
+    });
+
+    assert.equal(price.value, 99);
+    assert.equal(price.source, 'close');
+});
+
 test('uses snapshot close when live tick is missing', () => {
     const price = resolveDisplayPrice({
         snapshotClose: 88.4,

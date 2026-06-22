@@ -42,6 +42,15 @@ test('calculates stock market value from display price, lots, and 1000-share mul
     });
 });
 
+test('calculates short stock market value as a liability', () => {
+    const metrics = calculatePositionMetrics(stockPosition({ direction: 'Sell' }), {
+        displayPriceValue: 510,
+    });
+
+    assert.equal(metrics.marketValue, -1_020_000);
+    assert.equal(metrics.unrealizedReturnRate, 2);
+});
+
 test('keeps return rate available when display price is missing', () => {
     const metrics = calculatePositionMetrics(stockPosition(), {
         displayPriceValue: undefined,

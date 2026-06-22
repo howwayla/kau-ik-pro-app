@@ -153,5 +153,35 @@ await check('POST /api/v1/config/trade/default clears default broker preference'
     assert.equal(runtimeConfig.get().defaultTradeBroker, null);
 });
 
+await check('POST /api/v1/config/trade rejects desktop saved login without auth token', async () => {
+    const previousToken = process.env.KAUIK_DESKTOP_AUTH_TOKEN;
+    process.env.KAUIK_DESKTOP_AUTH_TOKEN = 'desktop-token';
+    try {
+        const runtimeConfig = new RuntimeConfigStore(tempConfigPath());
+        const app = buildTestApp(runtimeConfig);
+
+        const res = await app.inject({
+            method: 'POST',
+            url: '/api/v1/config/trade',
+            payload: {
+                provider: 'fubon',
+                id_no: 'A123456789',
+                password: 'account-pass',
+                cert_path: '/private/certs/fubon.p12',
+                cert_pass: 'cert-pass',
+                persist_metadata: false,
+            },
+        });
+
+        assert.equal(res.statusCode, 401);
+    } finally {
+        if (previousToken === undefined) {
+            delete process.env.KAUIK_DESKTOP_AUTH_TOKEN;
+        } else {
+            process.env.KAUIK_DESKTOP_AUTH_TOKEN = previousToken;
+        }
+    }
+});
+
 console.log(`\n${failures === 0 ? 'ALL GREEN' : failures + ' FAILING'}`);
 process.exit(failures === 0 ? 0 : 1);

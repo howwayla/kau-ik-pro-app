@@ -27,12 +27,13 @@ export function calculatePositionMetrics(
     const shares = position.quantity * STOCK_SHARE_MULTIPLIER;
     const cost = position.price * shares;
     const displayPrice = options.displayPriceValue;
+    const marketValueSign = position.direction === 'Sell' ? -1 : 1;
 
     return {
         appliesToStock: true,
         marketValue:
             displayPrice !== undefined && Number.isFinite(displayPrice)
-                ? displayPrice * shares
+                ? displayPrice * shares * marketValueSign
                 : undefined,
         unrealizedReturnRate:
             cost > 0 && Number.isFinite(position.pnl)

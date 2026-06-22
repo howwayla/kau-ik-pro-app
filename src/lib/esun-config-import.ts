@@ -63,7 +63,7 @@ function parseIni(text: string): IniSections {
         const line = rawLine.replace(/^\uFEFF/, '').trim();
         if (!line || line.startsWith(';') || line.startsWith('#')) continue;
 
-        const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+        const sectionMatch = stripInlineComment(line).match(/^\[([^\]]+)\]$/);
         if (sectionMatch) {
             section = normalize(sectionMatch[1] ?? '');
             sections[section] ??= {};
@@ -111,8 +111,12 @@ function cleanIniValue(input: string): string {
         return value.slice(1, -1).trim();
     }
 
-    value = value.replace(/\s+[;#].*$/, '').trim();
+    value = stripInlineComment(value);
     return value;
+}
+
+function stripInlineComment(input: string): string {
+    return input.replace(/\s+[;#].*$/, '').trim();
 }
 
 function normalize(input: string): string {

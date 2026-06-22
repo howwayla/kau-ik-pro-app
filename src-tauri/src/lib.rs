@@ -1,6 +1,10 @@
+use hmac::{Hmac, Mac};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -18,6 +22,11 @@ const SECURE_STORAGE_SPIKE_SERVICE: &str = "io.github.howwayla.kauikpro.secure-s
 const SECURE_STORAGE_SPIKE_ACCOUNT: &str = "roundtrip-test";
 const SECURE_STORAGE_SPIKE_VALUE: &str = "kau-ik-pro-spike-value-v1";
 const BROKER_SECRET_SERVICE: &str = "io.github.howwayla.kauikpro.broker-secrets";
+const DESKTOP_AUTH_HEADER: &str = "x-kauik-desktop-auth";
+const BROKER_SECRET_HTTP_TIMEOUT_SECS: u64 = 15;
+static DESKTOP_AUTH_TOKEN: OnceLock<String> = OnceLock::new();
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +104,11 @@ struct BrokerSecretLoginServerError {
     message: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct DesktopIdentityResponse {
+    signature: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrokerSecretLoginResult {
@@ -165,6 +179,62 @@ fn broker_secret_account(broker: &str) -> Result<&'static str, String> {
 fn broker_secret_entry(broker: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(BROKER_SECRET_SERVICE, broker_secret_account(broker)?)
         .map_err(|err| err.to_string())
+}
+
+fn desktop_identity_signature(token: &str, nonce: &str) -> Result<String, String> {
+    let mut mac = HmacSha256::new_from_slice(token.as_bytes()).map_err(|err| err.to_string())?;
+    mac.update(nonce.as_bytes());
+    Ok(hex::encode(mac.finalize().into_bytes()))
+}
+
+fn generate_desktop_auth_token() -> String {
+    let mut bytes = [0_u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+fn set_desktop_auth_token(token: String) {
+    let _ = DESKTOP_AUTH_TOKEN.set(token);
+}
+
+fn desktop_auth_token() -> Result<&'static str, String> {
+    DESKTOP_AUTH_TOKEN
+        .get()
+        .map(String::as_str)
+        .ok_or_else(|| "desktop auth token not initialized".to_string())
+}
+
+fn broker_secret_http_client() -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(BROKER_SECRET_HTTP_TIMEOUT_SECS))
+        .build()
+}
+
+async fn verify_desktop_server_identity(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<(), String> {
+    let nonce = generate_desktop_auth_token();
+    let response = client
+        .get(format!(
+            "http://127.0.0.1:8080/api/v1/desktop/identity?nonce={nonce}",
+        ))
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if !response.status().is_success() {
+        return Err("本機服務身分驗證失敗".to_string());
+    }
+    let body = response
+        .json::<DesktopIdentityResponse>()
+        .await
+        .map_err(|err| err.to_string())?;
+    let expected = desktop_identity_signature(token, &nonce)?;
+    if body.signature != expected {
+        return Err("本機服務身分驗證不符".to_string());
+    }
+    Ok(())
 }
 
 fn broker_secrets_to_json(secrets: &BrokerSecrets) -> Result<String, serde_json::Error> {
@@ -258,15 +328,25 @@ pub async fn broker_secret_login_result(
     let secrets = match broker_secret_load_result(&broker) {
         Ok(Some(secrets)) => secrets,
         Ok(None) => {
-            return BrokerSecretLoginResult::error(
-                "尚未在系統安全儲存中找到這家券商的登入資訊",
-            );
+            return BrokerSecretLoginResult::error("尚未在系統安全儲存中找到這家券商的登入資訊");
         }
         Err(err) => return BrokerSecretLoginResult::error(err),
     };
     let request = broker_secret_login_request(&broker, &metadata, &secrets);
-    let response = match reqwest::Client::new()
+    let token = match desktop_auth_token() {
+        Ok(token) => token,
+        Err(err) => return BrokerSecretLoginResult::error(err),
+    };
+    let client = match broker_secret_http_client() {
+        Ok(client) => client,
+        Err(err) => return BrokerSecretLoginResult::error(err.to_string()),
+    };
+    if let Err(err) = verify_desktop_server_identity(&client, token).await {
+        return BrokerSecretLoginResult::error(err);
+    }
+    let response = match client
         .post("http://127.0.0.1:8080/api/v1/config/trade")
+        .header(DESKTOP_AUTH_HEADER, token)
         .json(&request)
         .send()
         .await
@@ -401,12 +481,13 @@ fn show_main(app: &AppHandle) {
 // Spawn the bundled `nova-server` sidecar (the compiled Node/Fastify server)
 // on 127.0.0.1:8080 — the port the frontend targets in desktop mode
 // (see src/lib/runtime.ts getApiBase()).
-fn spawn_nova_server(app: &AppHandle, data_dir: PathBuf) {
+fn spawn_nova_server(app: &AppHandle, data_dir: PathBuf, desktop_auth_token: &str) {
     let command = match app.shell().sidecar("nova-server") {
         Ok(cmd) => cmd
             .env("HOST", "127.0.0.1")
             .env("PORT", "8080")
-            .env("KAUIK_DATA_DIR", data_dir.to_string_lossy().to_string()),
+            .env("KAUIK_DATA_DIR", data_dir.to_string_lossy().to_string())
+            .env("KAUIK_DESKTOP_AUTH_TOKEN", desktop_auth_token),
         Err(err) => {
             log::error!("failed to create nova-server sidecar: {err}");
             return;
@@ -471,11 +552,12 @@ pub fn run() {
             // ---- bundled Node server sidecar (auto-started; killed on exit) ----
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            spawn_nova_server(app.handle(), data_dir);
+            let desktop_auth_token = generate_desktop_auth_token();
+            set_desktop_auth_token(desktop_auth_token.clone());
+            spawn_nova_server(app.handle(), data_dir, &desktop_auth_token);
 
             // ---- tray / menu-bar icon ----
-            let show =
-                MenuItem::with_id(app, "show", "顯示 Kau-ik Pro", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "顯示 Kau-ik Pro", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "結束", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
@@ -596,5 +678,20 @@ mod tests {
         assert!(json.contains("\"persist_metadata\":false"));
         assert!(!json.contains("certPath"));
         assert!(!json.contains("certPass"));
+    }
+
+    #[test]
+    fn desktop_identity_signature_uses_token_and_nonce() {
+        let first = desktop_identity_signature("token-a", "nonce").unwrap();
+        let second = desktop_identity_signature("token-b", "nonce").unwrap();
+
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 64);
+    }
+
+    #[test]
+    fn broker_secret_http_client_has_timeout() {
+        assert!(broker_secret_http_client().is_ok());
+        assert_eq!(BROKER_SECRET_HTTP_TIMEOUT_SECS, 15);
     }
 }

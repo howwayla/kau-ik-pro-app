@@ -7,6 +7,10 @@ import type { FastifyInstance } from 'fastify';
 import { credsComplete, envBrokerCreds } from '../config.ts';
 import type { AppContext } from '../context.ts';
 import {
+    DESKTOP_AUTH_HEADER,
+    verifyDesktopAuthHeader,
+} from '../desktop-auth.ts';
+import {
     buildTradingProvider,
     followMarket,
     resolveBrokerCreds,
@@ -174,6 +178,17 @@ export function registerConfigRoutes(
             return reply
                 .code(400)
                 .send({ detail: 'provider 需為 mock | fubon | nova | esun' });
+        }
+
+        if (
+            req.body?.persist_metadata === false &&
+            process.env.KAUIK_DESKTOP_AUTH_TOKEN &&
+            !verifyDesktopAuthHeader(
+                req.headers[DESKTOP_AUTH_HEADER] as string | undefined,
+                process.env.KAUIK_DESKTOP_AUTH_TOKEN,
+            )
+        ) {
+            return reply.code(401).send({ detail: 'desktop auth required' });
         }
 
         if (name === 'mock') {

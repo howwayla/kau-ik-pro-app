@@ -20,10 +20,11 @@ import {
 } from '../lib/backend';
 import type { BrokerName } from '../lib/broker-secret-payload';
 import { loginBrokerWithSavedSecrets } from '../lib/broker-secret-store';
-import { resolveTradePickerAction } from '../lib/broker-picker';
+import { resolveTradePickerAction, savedBrokerNames } from '../lib/broker-picker';
 import { setCapabilities } from '../lib/capabilities';
 import { useTriggerStatus } from '../lib/triggers';
 import { SENSITIVE, setPrivacy, usePrivacy } from '../lib/privacy';
+import { isTauri } from '../lib/runtime';
 import { runSecureStorageSpike } from '../lib/secure-storage-spike';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
@@ -415,6 +416,7 @@ function BrokerMenu() {
                 provider === 'mock' ? undefined : config?.creds?.[provider],
             metadata:
                 provider === 'mock' ? null : (config?.metadata?.[provider] ?? null),
+            canUseSecureStorage: isTauri,
         });
 
         if (action.kind === 'idle') return;
@@ -449,6 +451,7 @@ function BrokerMenu() {
     };
 
     const current = config?.provider ?? 'mock';
+    const reconnectableBrokers = savedBrokerNames(config?.creds);
 
     return (
         <>
@@ -464,6 +467,15 @@ function BrokerMenu() {
                                 ? '模擬撮合（紙上交易）'
                                 : `${BROKER_LABEL[current]}證券 — ⚠ 真實下單`}
                         </span>
+                        {current === 'mock' && reconnectableBrokers.length > 0 && (
+                            <span className={styles.emptyHint}>
+                                已儲存：
+                                {reconnectableBrokers
+                                    .map((broker) => BROKER_LABEL[broker])
+                                    .join('、')}
+                                ；點券商可手動重連，重連前仍是模擬環境。
+                            </span>
+                        )}
                         <div className={styles.settingGroup}>
                             {(['mock', 'fubon', 'nova', 'esun'] as const).map(
                                 (p) => (

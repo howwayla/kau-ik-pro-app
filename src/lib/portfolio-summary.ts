@@ -14,6 +14,7 @@ export interface StockPositionSummary {
     totalCost: number;
     totalMarketValue: number;
     todayUnrealized: number;
+    todayBasisValue: number;
     missingPriceCount: number;
 }
 
@@ -33,6 +34,8 @@ export function summarizeStockPositions(
 
             summary.totalMarketValue += current * position.quantity * 1000;
             if (position.reference !== undefined && position.reference > 0) {
+                summary.todayBasisValue +=
+                    position.reference * position.quantity * 1000;
                 summary.todayUnrealized +=
                     (current - position.reference) * position.quantity * 1000;
             }
@@ -43,6 +46,7 @@ export function summarizeStockPositions(
             totalCost: 0,
             totalMarketValue: 0,
             todayUnrealized: 0,
+            todayBasisValue: 0,
             missingPriceCount: 0,
         },
     );

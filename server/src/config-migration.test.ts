@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { migrateRuntimeConfig } from './config-migration.ts';
+import {
+    legacyRuntimeConfigFiles,
+    migrateRuntimeConfig,
+} from './config-migration.ts';
 import type { BrokerCreds } from './config.ts';
 
 let failures = 0;
@@ -80,6 +83,25 @@ await check('migrates broker metadata from legacy bundle-id config to canonical 
         apiUrl: 'https://esun.example.test',
     });
     assertOwnerOnlyMode(target);
+});
+
+await check('discovers legacy product-name configs from bundle-id app data dir', () => {
+    const root = tempRoot();
+    const target = join(root, 'io.github.howwayla.kauikpro', 'config.json');
+
+    assert.deepEqual(migrateRuntimeConfig({
+        targetFile: target,
+    }).sources, []);
+    assert.ok(
+        legacyRuntimeConfigFiles(target).includes(
+            join(root, 'Kau-ik Pro', 'config.json'),
+        ),
+    );
+    assert.ok(
+        legacyRuntimeConfigFiles(target).includes(
+            join(root, 'Kau-ik Pro', 'server', 'config.json'),
+        ),
+    );
 });
 
 await check('derives metadata from legacy brokerCreds without persisting secrets', () => {

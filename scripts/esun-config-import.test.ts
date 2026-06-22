@@ -79,6 +79,22 @@ test('parseEsunConfigIni keeps comment markers inside quoted values', () => {
     });
 });
 
+test('parseEsunConfigIni accepts inline comments after section headers', () => {
+    const parsed = parseEsunConfigIni(`
+        [Core] ; production endpoint
+        Entry = https://esuntradingapi.esunsec.com.tw/api/v1
+        [Api] # production keys
+        Key = esun-api-key
+        Secret = esun-api-secret
+        [User] ; login
+        Account = A123456789
+    `);
+
+    assert.equal(parsed.apiKey, 'esun-api-key');
+    assert.equal(parsed.apiSecret, 'esun-api-secret');
+    assert.equal(parsed.idNo, 'A123456789');
+});
+
 test('parseEsunConfigIni explains missing required fields', () => {
     assert.throws(
         () =>

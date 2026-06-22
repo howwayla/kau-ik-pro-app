@@ -95,3 +95,28 @@ test('keeps resolved fallback prices when broker last_price is zero and reports 
     );
     assert.equal(formatMissingPriceCountHint(0), '');
 });
+
+test('uses only positions with reference prices for today return basis', () => {
+    const summary = summarizeStockPositions([
+        {
+            code: '2330',
+            quantity: 1,
+            averagePrice: 500,
+            pnl: 10_000,
+            reference: 490,
+            displayPrice: price(510, 'live'),
+        },
+        {
+            code: '9999',
+            quantity: 1,
+            averagePrice: 100,
+            pnl: 0,
+            reference: undefined,
+            displayPrice: price(120, 'live'),
+        },
+    ]);
+
+    assert.equal(summary.totalMarketValue, 630_000);
+    assert.equal(summary.todayUnrealized, 20_000);
+    assert.equal(summary.todayBasisValue, 490_000);
+});
