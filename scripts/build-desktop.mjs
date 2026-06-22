@@ -159,6 +159,12 @@ console.log(
   `\n[2/2] ${dev ? 'starting Tauri dev window' : 'bundling the desktop app'} (\`tauri ${tauriCmd}\`)` +
     `${dev ? '' : ' — Rust release build, this takes several minutes; do not interrupt'}…\n`,
 );
+
+if (dev) {
+  run('pnpm', ['exec', 'tauri', tauriCmd, ...extraArgs]);
+  process.exit(0);
+}
+
 const tauriResult = runWithStaleTauriCacheRetry({
   runTauri: () => runCaptured('pnpm', ['exec', 'tauri', tauriCmd, ...extraArgs]),
   cleanCargo: () => runCaptured('cargo', ['clean', '--manifest-path', 'src-tauri/Cargo.toml']),

@@ -111,6 +111,36 @@ await check('derives metadata from legacy brokerCreds without persisting secrets
     }
 });
 
+await check('scrubs legacy config files after deriving broker metadata', () => {
+    const root = tempRoot();
+    const target = join(root, 'Kau-ik Pro', 'config.json');
+    const legacy = join(root, 'Kau-ik Pro', 'server', 'config.json');
+    writeJson(legacy, {
+        tradeProvider: 'fubon',
+        brokerCreds: { fubon: fubonCreds },
+        brokerMetadata: {},
+    });
+
+    migrateRuntimeConfig({ targetFile: target, legacyFiles: [legacy] });
+
+    const legacyText = readFileSync(legacy, 'utf8');
+    const scrubbedLegacy = JSON.parse(legacyText);
+    assert.deepEqual(scrubbedLegacy.brokerMetadata.fubon, {
+        certPath: '/private/certs/fubon.p12',
+        apiUrl: '',
+    });
+    assert.equal(Object.hasOwn(scrubbedLegacy, 'brokerCreds'), false);
+    for (const secret of [
+        'A123456789',
+        'account-pass',
+        'api-key',
+        'api-secret',
+        'cert-pass',
+    ]) {
+        assert.equal(legacyText.includes(secret), false, `${secret} leaked`);
+    }
+});
+
 await check('fills only missing metadata and does not overwrite canonical settings', () => {
     const root = tempRoot();
     const target = join(root, 'Kau-ik Pro', 'config.json');

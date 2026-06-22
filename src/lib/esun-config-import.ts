@@ -103,7 +103,6 @@ function readOptional(
 function cleanIniValue(input: string): string {
     let value = input.trim();
     if (value.startsWith(';') || value.startsWith('#')) return '';
-    value = value.replace(/\s+[;#].*$/, '').trim();
 
     if (
         (value.startsWith('"') && value.endsWith('"')) ||
@@ -112,6 +111,7 @@ function cleanIniValue(input: string): string {
         return value.slice(1, -1).trim();
     }
 
+    value = value.replace(/\s+[;#].*$/, '').trim();
     return value;
 }
 

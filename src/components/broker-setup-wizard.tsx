@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     fetchTradeConfig,
-    setDefaultTradeBroker,
     setTradeMetadata,
     setTradeSource,
 } from '../lib/backend';
@@ -25,6 +24,10 @@ import {
     validateBrokerSetupForm,
     type BrokerSetupErrors,
 } from '../lib/broker-setup-fields';
+import {
+    getPreviousBrokerMetadata,
+    shouldRollbackSavedSecrets,
+} from '../lib/broker-setup-flow';
 import {
     applyEsunConfigToForm,
     isAbsoluteCertificatePath,
@@ -61,7 +64,6 @@ export function BrokerSetupWizard({
     const [errors, setErrors] = useState<BrokerSetupErrors>({});
     const [busy, setBusy] = useState(false);
     const [submitError, setSubmitError] = useState(initialError);
-    const [makeDefault, setMakeDefault] = useState(false);
     const [esunConfigStatus, setEsunConfigStatus] = useState('');
     const esunConfigInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -73,7 +75,6 @@ export function BrokerSetupWizard({
         setErrors({});
         setBusy(false);
         setSubmitError(initialError);
-        setMakeDefault(false);
         setEsunConfigStatus('');
     }, [open, initialBroker, initialError]);
 
@@ -185,9 +186,10 @@ export function BrokerSetupWizard({
             liveSwitchSucceeded = true;
 
             if (isTauri) {
-                const previousMetadata = (await fetchTradeConfig()).metadata[
-                    broker
-                ];
+                const previousMetadata = await getPreviousBrokerMetadata(
+                    fetchTradeConfig,
+                    broker,
+                );
                 const existingSecrets = await statusBrokerSecrets(broker).catch(
                     () => null,
                 );
@@ -214,7 +216,7 @@ export function BrokerSetupWizard({
                     } catch (storageError) {
                         if (
                             savedSecrets &&
-                            existingSecrets?.present === false
+                            shouldRollbackSavedSecrets(existingSecrets)
                         ) {
                             await deleteBrokerSecrets(broker).catch(() => null);
                         }
@@ -225,20 +227,6 @@ export function BrokerSetupWizard({
 
             const warnings: string[] = [];
             if (result.warning) warnings.push(result.warning);
-
-            if (makeDefault) {
-                try {
-                    await setDefaultTradeBroker(broker);
-                } catch (defaultError) {
-                    const message =
-                        defaultError instanceof Error
-                            ? defaultError.message
-                            : String(defaultError);
-                    warnings.push(
-                        `登入完成，但預設券商偏好未儲存：${message}`,
-                    );
-                }
-            }
 
             if (warnings.length > 0) {
                 reloadAfterWarning(warnings.join('；'));
@@ -466,16 +454,6 @@ export function BrokerSetupWizard({
                                     </div>
                                 )}
                             </div>
-                            <label className={styles.hint}>
-                                <input
-                                    type='checkbox'
-                                    checked={makeDefault}
-                                    onChange={(e) =>
-                                        setMakeDefault(e.target.checked)
-                                    }
-                                />{' '}
-                                以後開啟 App 時優先登入這家券商
-                            </label>
                         </>
                     )}
 

@@ -88,6 +88,7 @@ export function migrateRuntimeConfig({
             used = true;
         }
 
+        scrubRuntimeConfigFile(legacyFile, legacy, legacyMetadata);
         if (used) sources.push(legacyFile);
     }
 
@@ -102,6 +103,24 @@ export function migrateRuntimeConfig({
     mkdirSync(dirname(targetFile), { recursive: true });
     writeFileSync(targetFile, JSON.stringify(next, null, 2), { mode: 0o600 });
     return { migrated: sources.length > 0, sources };
+}
+
+function scrubRuntimeConfigFile(
+    filePath: string,
+    config: RuntimeConfigJson,
+    metadata: Partial<Record<BrokerKey, BrokerMetadata>>,
+): void {
+    if (!config.brokerCreds) return;
+
+    const next: RuntimeConfigJson = { ...config };
+    delete next.brokerCreds;
+    if (Object.keys(metadata).length > 0) {
+        next.brokerMetadata = {
+            ...(next.brokerMetadata ?? {}),
+            ...metadata,
+        };
+    }
+    writeFileSync(filePath, JSON.stringify(next, null, 2), { mode: 0o600 });
 }
 
 function readConfig(filePath: string): RuntimeConfigJson | null {

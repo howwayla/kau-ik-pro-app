@@ -57,6 +57,28 @@ test('parseEsunConfigIni treats official placeholder comments as empty values', 
     assert.equal(parsed.certPath, '');
 });
 
+test('parseEsunConfigIni keeps comment markers inside quoted values', () => {
+    const parsed = parseEsunConfigIni(`
+        [Core]
+        Entry = "https://esun.example.test/api/v1 # simulation"
+        [Api]
+        Key = "esun api ; key"
+        Secret = "secret # one"
+        [User]
+        Account = A123456789
+        [Cert]
+        Path = "/Users/liweiyeh/certs/esun ; active.p12"
+    `);
+
+    assert.deepEqual(parsed, {
+        apiUrl: 'https://esun.example.test/api/v1 # simulation',
+        apiKey: 'esun api ; key',
+        apiSecret: 'secret # one',
+        idNo: 'A123456789',
+        certPath: '/Users/liweiyeh/certs/esun ; active.p12',
+    });
+});
+
 test('parseEsunConfigIni explains missing required fields', () => {
     assert.throws(
         () =>

@@ -52,3 +52,9 @@ test('BrokerSetupWizard renders esun config import instead of manual key fields'
     assert.doesNotMatch(html, /API Key/);
     assert.doesNotMatch(html, /API Secret/);
 });
+
+test('BrokerSetupWizard does not promise automatic broker login on next launch', async () => {
+    const html = await renderWizard({ initialBroker: 'fubon' });
+
+    assert.doesNotMatch(html, /以後開啟 App 時優先登入這家券商/);
+});

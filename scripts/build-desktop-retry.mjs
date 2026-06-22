@@ -8,9 +8,18 @@ export function isStaleTauriCacheError(output) {
   );
 }
 
-export function runWithStaleTauriCacheRetry({ runTauri, cleanCargo, log = console.log }) {
+export function runWithStaleTauriCacheRetry({
+  runTauri,
+  cleanCargo,
+  log = console.log,
+  retryOnStaleCache = true,
+}) {
   const first = runTauri();
-  if (first.status === 0 || !isStaleTauriCacheError(first.output ?? '')) {
+  if (
+    first.status === 0 ||
+    !retryOnStaleCache ||
+    !isStaleTauriCacheError(first.output ?? '')
+  ) {
     return first;
   }
 

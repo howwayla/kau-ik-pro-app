@@ -20,10 +20,10 @@ import {
 } from '../lib/backend';
 import type { BrokerName } from '../lib/broker-secret-payload';
 import { loginBrokerWithSavedSecrets } from '../lib/broker-secret-store';
+import { resolveTradePickerAction } from '../lib/broker-picker';
 import { setCapabilities } from '../lib/capabilities';
 import { useTriggerStatus } from '../lib/triggers';
 import { SENSITIVE, setPrivacy, usePrivacy } from '../lib/privacy';
-import { isTauri } from '../lib/runtime';
 import { runSecureStorageSpike } from '../lib/secure-storage-spike';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
@@ -407,17 +407,22 @@ function BrokerMenu() {
     };
 
     const pick = (provider: TradeProviderName, close?: () => void) => {
-        if (provider === current || busy) return;
-        if (provider === 'mock') {
-            void doSwitch('mock');
-            return;
-        }
-        const avail = config?.creds?.[provider];
-        if (avail?.env) {
+        const action = resolveTradePickerAction({
+            provider,
+            current,
+            busy: Boolean(busy),
+            availability:
+                provider === 'mock' ? undefined : config?.creds?.[provider],
+            metadata:
+                provider === 'mock' ? null : (config?.metadata?.[provider] ?? null),
+        });
+
+        if (action.kind === 'idle') return;
+        if (action.kind === 'switch') {
             void doSwitch(provider);
-        } else if (avail?.saved && isTauri && config?.metadata?.[provider]) {
-            void doSavedSwitch(provider, config.metadata[provider], close);
-        } else {
+        } else if (action.kind === 'saved-switch' && provider !== 'mock') {
+            void doSavedSwitch(provider, action.metadata, close);
+        } else if (provider !== 'mock') {
             close?.();
             openWizard(provider);
             setError('');
