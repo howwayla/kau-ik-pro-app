@@ -35,6 +35,23 @@ export function resolveTradePickerAction({
     return { kind: 'setup' };
 }
 
+export function effectiveBrokerAvailability({
+    availability,
+    canUseSecureStorage,
+    secretPresent,
+}: {
+    availability: BrokerAvailability;
+    canUseSecureStorage: boolean;
+    secretPresent?: boolean;
+}): BrokerAvailability {
+    if (!availability) return undefined;
+    if (availability.env || !canUseSecureStorage) return availability;
+    return {
+        env: false,
+        saved: availability.saved && secretPresent === true,
+    };
+}
+
 export function savedBrokerNames(
     creds: TradeConfig['creds'] | undefined,
 ): BrokerName[] {

@@ -19,8 +19,15 @@ import {
     type TradeProviderName,
 } from '../lib/backend';
 import type { BrokerName } from '../lib/broker-secret-payload';
-import { loginBrokerWithSavedSecrets } from '../lib/broker-secret-store';
-import { resolveTradePickerAction, savedBrokerNames } from '../lib/broker-picker';
+import {
+    loginBrokerWithSavedSecrets,
+    statusBrokerSecrets,
+} from '../lib/broker-secret-store';
+import {
+    effectiveBrokerAvailability,
+    resolveTradePickerAction,
+    savedBrokerNames,
+} from '../lib/broker-picker';
 import { setCapabilities } from '../lib/capabilities';
 import { useTriggerStatus } from '../lib/triggers';
 import { SENSITIVE, setPrivacy, usePrivacy } from '../lib/privacy';
@@ -340,6 +347,9 @@ function BrokerMenu() {
     const [wizardOpen, setWizardOpen] = useState(false);
     const [busy, setBusy] = useState<TradeProviderName | null>(null);
     const [error, setError] = useState('');
+    const [secretPresence, setSecretPresence] = useState<
+        Partial<Record<BrokerName, boolean>>
+    >({});
     const [storageCheck, setStorageCheck] = useState<{
         busy: boolean;
         ok: boolean | null;
@@ -350,6 +360,27 @@ function BrokerMenu() {
         fetchTradeConfig()
             .then((cfg) => {
                 setConfig(cfg);
+                if (isTauri) {
+                    void Promise.all(
+                        (['fubon', 'nova', 'esun'] as const).map(
+                            async (broker) => {
+                                if (!cfg.creds[broker].saved) {
+                                    return [broker, false] as const;
+                                }
+                                const status = await statusBrokerSecrets(
+                                    broker,
+                                ).catch(() => ({
+                                    ok: false,
+                                    present: false,
+                                    error: 'status failed',
+                                }));
+                                return [broker, status.present] as const;
+                            },
+                        ),
+                    ).then((entries) =>
+                        setSecretPresence(Object.fromEntries(entries)),
+                    );
+                }
                 // scope client-side stop/take triggers to this broker
             })
             .catch(() => setConfig(null));
@@ -413,7 +444,13 @@ function BrokerMenu() {
             current,
             busy: Boolean(busy),
             availability:
-                provider === 'mock' ? undefined : config?.creds?.[provider],
+                provider === 'mock'
+                    ? undefined
+                    : effectiveBrokerAvailability({
+                          availability: config?.creds?.[provider],
+                          canUseSecureStorage: isTauri,
+                          secretPresent: secretPresence[provider],
+                      }),
             metadata:
                 provider === 'mock' ? null : (config?.metadata?.[provider] ?? null),
             canUseSecureStorage: isTauri,
@@ -451,7 +488,26 @@ function BrokerMenu() {
     };
 
     const current = config?.provider ?? 'mock';
-    const reconnectableBrokers = savedBrokerNames(config?.creds);
+    const effectiveCreds = config
+        ? {
+              fubon: effectiveBrokerAvailability({
+                  availability: config.creds.fubon,
+                  canUseSecureStorage: isTauri,
+                  secretPresent: secretPresence.fubon,
+              }) ?? { env: false, saved: false },
+              nova: effectiveBrokerAvailability({
+                  availability: config.creds.nova,
+                  canUseSecureStorage: isTauri,
+                  secretPresent: secretPresence.nova,
+              }) ?? { env: false, saved: false },
+              esun: effectiveBrokerAvailability({
+                  availability: config.creds.esun,
+                  canUseSecureStorage: isTauri,
+                  secretPresent: secretPresence.esun,
+              }) ?? { env: false, saved: false },
+          }
+        : undefined;
+    const reconnectableBrokers = savedBrokerNames(effectiveCreds);
 
     return (
         <>

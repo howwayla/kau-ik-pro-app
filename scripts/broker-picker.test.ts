@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+    effectiveBrokerAvailability,
     resolveTradePickerAction,
     savedBrokerNames,
 } from '../src/lib/broker-picker.ts';
@@ -83,5 +84,25 @@ test('savedBrokerNames lists brokers that can be manually reconnected', () => {
             esun: { env: false, saved: false },
         }),
         ['fubon', 'nova'],
+    );
+});
+
+test('effectiveBrokerAvailability hides metadata-only saved brokers without keychain secrets', () => {
+    assert.deepEqual(
+        effectiveBrokerAvailability({
+            availability: { env: false, saved: true },
+            canUseSecureStorage: true,
+            secretPresent: false,
+        }),
+        { env: false, saved: false },
+    );
+
+    assert.deepEqual(
+        effectiveBrokerAvailability({
+            availability: { env: false, saved: true },
+            canUseSecureStorage: true,
+            secretPresent: true,
+        }),
+        { env: false, saved: true },
     );
 });
