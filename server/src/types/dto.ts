@@ -405,28 +405,6 @@ export interface PnlRow {
     pnl: number;
 }
 
-/** 投組 vs 基準 ETF 的指數化走勢序列（基期 = 0%） */
-export interface PerfSeries {
-    kind: 'portfolio' | 'benchmark';
-    code: string;
-    name: string;
-    /** 與 dates 對齊；該日尚無資料（上市前）= null */
-    values: (number | null)[];
-    last_pct: number | null;
-}
-
-export interface PerformanceResponse {
-    /** mtd | 1m | 3m | 6m | ytd | 1y */
-    period: string;
-    /** dates[0] = 基期（期初前一交易日），各序列在此為 0% */
-    dates: string[];
-    series: PerfSeries[];
-    holdings_count: number;
-    /** 投組所屬券商（trade provider 名，mock = 紙上交易） */
-    broker: string;
-    warnings: string[];
-}
-
 export interface ServerWatchlist {
     id: string;
     name: string;
