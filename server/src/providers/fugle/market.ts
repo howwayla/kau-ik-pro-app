@@ -1264,6 +1264,12 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         const set = this.subs.get(symbol);
         if (!set?.delete(quote)) return;
         if (set.size === 0) this.subs.delete(symbol);
+        // 退訂深度後清掉 seeded：下次重訂才會重新 seed（否則殘留的 seeded
+        // 會讓 seedBookWithRetry 在尚未收到新五檔時就誤判已補上而提早停）
+        if (quote === 'BidAsk') {
+            const entry = this.quoteCache.get(symbol);
+            if (entry) entry.seeded = false;
+        }
         const ws = this.wsKindFor(symbol) === 'stock' ? this.stockWs : this.futoptWs;
         ws?.unsubscribe?.({
             channel: quote === 'Tick' ? 'trades' : 'books',
