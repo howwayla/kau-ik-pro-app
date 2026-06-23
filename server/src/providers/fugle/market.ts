@@ -489,15 +489,22 @@ export class FugleMarketDataProvider implements MarketDataProvider {
 
     /** 並發節流：限制同時在途的 REST quote 數，把批次突發攤平 */
     private async withQuoteSlot<T>(fn: () => Promise<T>): Promise<T> {
+        // slot 直接交棒：被喚醒者承接前一個釋出的 slot（不再自行 +1），只有
+        // 新進者才佔一個 slot；完成時有等待者就交棒（計數不動），否則才 -1。
+        // 如此 restActive 永不超過上限——避免「-1 之後、被喚醒者尚未 +1」
+        // 的 microtask 空檔被新進者插隊而瞬間衝破 3。
+        let awoken = false;
         if (this.restActive >= REST_QUOTE_CONCURRENCY) {
             await new Promise<void>((r) => this.restWaiters.push(r));
+            awoken = true;
         }
-        this.restActive += 1;
+        if (!awoken) this.restActive += 1;
         try {
             return await fn();
         } finally {
-            this.restActive -= 1;
-            this.restWaiters.shift()?.();
+            const next = this.restWaiters.shift();
+            if (next) next();
+            else this.restActive -= 1;
         }
     }
 
