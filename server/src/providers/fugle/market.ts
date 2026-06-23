@@ -1200,10 +1200,18 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         const symbol = isContinuousAlias(key.code)
             ? ((await this.resolveAlias(key.code)) ?? key.code)
             : toFugleSymbol(key.code);
+        let set = this.subs.get(symbol);
+        if (!set) {
+            set = new Set();
+            this.subs.set(symbol, set);
+        }
+        if (set.has(quote)) return; // 已訂閱：去重在 seed「之前」，避免重連/
+        // 重整對既有訂閱重發 subscribe 時，每次又起一條 seedBookWithRetry
+        // 退避鏈（在並發節流下放大 REST 呼叫）。首次 seed 失敗的補救由那條
+        // 既有的退避鏈接手，不靠重發 subscribe。
+        set.add(quote);
         // seed day state so the first WS tick has open/high/low context.
-        // 放在重複訂閱檢查「之前」：首次 seed 可能剛好撞上重啟瞬間失敗，
-        // 前端重新整理會重發 subscribe — 必須讓它能補 seed（fetchQuote
-        // 有 TTL cache，重複呼叫成本低）
+        // fetchQuote 有 TTL cache；只在首次訂閱該 quote 類型時補 seed。
         const entry = await this.fetchQuote(symbol);
         // REST quote 已帶最後五檔 — 直接 seed 深度面板，不必等 WS snapshot
         if (quote === 'BidAsk') {
@@ -1212,13 +1220,6 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             // 不讓深度面板永遠空白
             else this.seedBookWithRetry(symbol);
         }
-        let set = this.subs.get(symbol);
-        if (!set) {
-            set = new Set();
-            this.subs.set(symbol, set);
-        }
-        if (set.has(quote)) return;
-        set.add(quote);
         const ws = await this.ensureWs(this.wsKindFor(symbol));
         ws.subscribe(this.wsSubParams(symbol, quote === 'Tick' ? 'trades' : 'books'));
     }
