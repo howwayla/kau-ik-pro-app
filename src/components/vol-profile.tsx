@@ -38,6 +38,10 @@ export function VolProfile({ contract }: { contract: ContractBase }) {
     const [version, setVersion] = useState(0);
     const [profile, setProfile] = useState<Profile>(new Map());
     const [loading, setLoading] = useState(true);
+    // 期貨/選擇權：官方分價量(intraday/volumes)無內外盤欄位(volumeAtBid/Ask)，
+    // 全部會落入 und → 內外盤比恆 50/50（誤導）。期權直接不顯示內外盤比。
+    const isFop =
+        contract.security_type === 'FUT' || contract.security_type === 'OPT';
 
     useEffect(() => {
         let cancelled = false;
@@ -47,10 +51,6 @@ export function VolProfile({ contract }: { contract: ContractBase }) {
         let baseMs = 0;
         setProfile(prof);
         setLoading(true);
-
-        const isFop =
-            contract.security_type === 'FUT' ||
-            contract.security_type === 'OPT';
 
         const loadOfficial = async (): Promise<boolean> => {
             try {
@@ -166,20 +166,22 @@ export function VolProfile({ contract }: { contract: ContractBase }) {
 
     return (
         <div className={styles.wrap}>
-            <div className={styles.ratioRow}>
-                <span className={panel.dirText.up}>
-                    外盤 {buyPct.toFixed(1)}%
-                </span>
-                <div className={styles.ratioTrack}>
-                    <div
-                        className={styles.ratioBuy}
-                        style={{ width: `${buyPct}%` }}
-                    />
+            {!isFop && (
+                <div className={styles.ratioRow}>
+                    <span className={panel.dirText.up}>
+                        外盤 {buyPct.toFixed(1)}%
+                    </span>
+                    <div className={styles.ratioTrack}>
+                        <div
+                            className={styles.ratioBuy}
+                            style={{ width: `${buyPct}%` }}
+                        />
+                    </div>
+                    <span className={panel.dirText.down}>
+                        內盤 {(100 - buyPct).toFixed(1)}%
+                    </span>
                 </div>
-                <span className={panel.dirText.down}>
-                    內盤 {(100 - buyPct).toFixed(1)}%
-                </span>
-            </div>
+            )}
             <div className={styles.list}>
                 {rows.map(([price, lv]) => {
                     const t = lv.buy + lv.sell + lv.und;
