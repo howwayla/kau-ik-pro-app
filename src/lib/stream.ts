@@ -119,6 +119,11 @@ export function registerSubscription(body: {
     subscriptionRegistry.set(`${body.code}:${body.quote_type}`, body);
 }
 
+/** drop a subscription from the replay registry so reconnect won't re-add it */
+export function unregisterSubscription(code: string, quoteType: string) {
+    subscriptionRegistry.delete(`${code}:${quoteType}`);
+}
+
 let resubscribeTimer: ReturnType<typeof setTimeout> | null = null;
 let resubscribing = false;
 

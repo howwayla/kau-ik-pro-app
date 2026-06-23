@@ -28,7 +28,7 @@ import type {
     Margin,
     StockPosition,
 } from './types/portfolio';
-import { registerSubscription } from './stream';
+import { registerSubscription, unregisterSubscription } from './stream';
 import type { HistoryTicks, VolumeLevel } from './types/tick';
 import { todayStr } from './utils/date';
 
@@ -261,6 +261,7 @@ export function unsubscribeQuote(
     contract: ContractBase,
     quoteType: QuoteTypeName,
 ) {
+    unregisterSubscription(contract.code, quoteType);
     return apiPost<SubscriptionResponse>('/api/v1/stream/unsubscribe', {
         ...contractKey(contract),
         target_code: contract.target_code ?? null,
