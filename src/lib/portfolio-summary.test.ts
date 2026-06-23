@@ -21,6 +21,7 @@ test('includes fallback display prices in total market value', () => {
     const summary = summarizeStockPositions([
         {
             code: '2330',
+            direction: 'Buy',
             quantity: 2,
             averagePrice: 500,
             pnl: 1200,
@@ -29,6 +30,7 @@ test('includes fallback display prices in total market value', () => {
         },
         {
             code: '2317',
+            direction: 'Buy',
             quantity: 1,
             averagePrice: 100,
             pnl: 0,
@@ -46,6 +48,7 @@ test('excludes only positions with no display price', () => {
     const summary = summarizeStockPositions([
         {
             code: '2330',
+            direction: 'Buy',
             quantity: 2,
             averagePrice: 500,
             pnl: 1200,
@@ -63,6 +66,7 @@ test('keeps resolved fallback prices when broker last_price is zero and reports 
     const summary = summarizeStockPositions([
         {
             code: '2330',
+            direction: 'Buy',
             quantity: 2,
             averagePrice: 500,
             pnl: 1200,
@@ -74,6 +78,7 @@ test('keeps resolved fallback prices when broker last_price is zero and reports 
         },
         {
             code: '2317',
+            direction: 'Buy',
             quantity: 1,
             averagePrice: 100,
             pnl: -100,
@@ -100,6 +105,7 @@ test('uses only positions with reference prices for today return basis', () => {
     const summary = summarizeStockPositions([
         {
             code: '2330',
+            direction: 'Buy',
             quantity: 1,
             averagePrice: 500,
             pnl: 10_000,
@@ -108,6 +114,7 @@ test('uses only positions with reference prices for today return basis', () => {
         },
         {
             code: '9999',
+            direction: 'Buy',
             quantity: 1,
             averagePrice: 100,
             pnl: 0,
@@ -119,4 +126,24 @@ test('uses only positions with reference prices for today return basis', () => {
     assert.equal(summary.totalMarketValue, 630_000);
     assert.equal(summary.todayUnrealized, 20_000);
     assert.equal(summary.todayBasisValue, 490_000);
+});
+
+test('summarizes short stock positions with signed totals', () => {
+    const summary = summarizeStockPositions([
+        {
+            code: '2603',
+            direction: 'Sell',
+            quantity: 1,
+            averagePrice: 100,
+            pnl: 10_000,
+            reference: 100,
+            displayPrice: price(90, 'live'),
+        },
+    ]);
+
+    assert.equal(summary.totalPnl, 10_000);
+    assert.equal(summary.totalCost, -100_000);
+    assert.equal(summary.totalMarketValue, -90_000);
+    assert.equal(summary.todayBasisValue, -100_000);
+    assert.equal(summary.todayUnrealized, 10_000);
 });

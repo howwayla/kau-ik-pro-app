@@ -856,6 +856,7 @@ function AccountView({
                     const snapshot = snapshots[position.code];
                     return {
                         code: position.code,
+                        direction: position.direction,
                         quantity: position.quantity,
                         averagePrice: position.price,
                         pnl: position.pnl,
@@ -893,8 +894,12 @@ function AccountView({
 
     const dirOf = (v: number): 'up' | 'down' | 'flat' =>
         v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
-    const withPct = (v: number, base: number) =>
-        `${fmtSigned(v, 0)}${base > 0 ? ` (${((v / base) * 100).toFixed(2)}%)` : ''}`;
+    const withPct = (v: number, base: number) => {
+        const basis = Math.abs(base);
+        return `${fmtSigned(v, 0)}${
+            basis > 0 ? ` (${((v / basis) * 100).toFixed(2)}%)` : ''
+        }`;
+    };
 
     const items: {
         label: string;

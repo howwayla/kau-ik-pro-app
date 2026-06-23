@@ -2,6 +2,7 @@ import type { DisplayPrice } from './display-price';
 
 export interface StockPositionSummaryInput {
     code: string;
+    direction: 'Buy' | 'Sell';
     quantity: number;
     averagePrice: number;
     pnl: number;
@@ -23,8 +24,10 @@ export function summarizeStockPositions(
 ): StockPositionSummary {
     return positions.reduce<StockPositionSummary>(
         (summary, position) => {
+            const directionSign = position.direction === 'Sell' ? -1 : 1;
             summary.totalPnl += position.pnl;
-            summary.totalCost += position.averagePrice * position.quantity * 1000;
+            summary.totalCost +=
+                position.averagePrice * position.quantity * 1000 * directionSign;
 
             const current = position.displayPrice.value;
             if (current === undefined) {
@@ -32,12 +35,16 @@ export function summarizeStockPositions(
                 return summary;
             }
 
-            summary.totalMarketValue += current * position.quantity * 1000;
+            summary.totalMarketValue +=
+                current * position.quantity * 1000 * directionSign;
             if (position.reference !== undefined && position.reference > 0) {
                 summary.todayBasisValue +=
-                    position.reference * position.quantity * 1000;
+                    position.reference * position.quantity * 1000 * directionSign;
                 summary.todayUnrealized +=
-                    (current - position.reference) * position.quantity * 1000;
+                    (current - position.reference) *
+                    position.quantity *
+                    1000 *
+                    directionSign;
             }
             return summary;
         },
