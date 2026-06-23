@@ -1035,9 +1035,12 @@ export function CandleChart({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [JSON.stringify(triggers), themeKey, contract.code, chartStyle]);
 
-    // position average-price line（持倉均價）
+    // position average-price line（持倉均價）— 掛在當前可見 series 上（K棒/折線）
     useEffect(() => {
-        const series = candleSeriesRef.current;
+        const series =
+            chartStyle === 'line'
+                ? lineSeriesRef.current
+                : candleSeriesRef.current;
         if (!series || !position) return;
         const line = series.createPriceLine({
             price: position.price,
@@ -1057,6 +1060,7 @@ export function CandleChart({
         position?.direction,
         themeKey,
         contract.code,
+        chartStyle,
     ]);
 
     // one-click breakeven: move (or create) the stop to the entry price
