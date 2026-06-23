@@ -10,9 +10,12 @@ import type { ContractInfo, SecurityType } from './types/contract';
 const cache = new Map<string, ContractInfo>();
 const pending = new Map<string, Promise<ContractInfo>>();
 const subscribed = new Set<string>();
-// 「暫看」訂閱（點排行/搜尋只檢視、未加入追蹤）：可被回收。watchlist/釘選
-// 透過 primeContract / claimContract 認領後即從此集合移除，cleanup 便不會退訂。
+// 「暫看」訂閱（點排行/搜尋只檢視、未加入追蹤）：可被回收。
 const temporary = new Set<string>();
+// 永久持有（watchlist 加入 / 釘選）的權威集合 — 由 primeContract / claimContract
+// 寫入。ensureContractTemporary 在 await 之後、以及 cleanup 當下都查它,
+// 確保「曾是/已成為永久」的標的絕不被暫看 cleanup 退訂（含 await 期間才被認領的 TOCTOU）。
+const permanent = new Set<string>();
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -29,11 +32,13 @@ export function primeContract(contract: ContractInfo) {
         emit();
     }
     subscribed.add(contract.code); // watchlist already subscribed it
-    temporary.delete(contract.code); // 永久持有 — 不再是暫看,別被回收
+    permanent.add(contract.code); // 永久持有 — 不再是暫看,別被回收
+    temporary.delete(contract.code);
 }
 
 /** 標記 code 為永久持有（釘選面板等）→ 其暫看訂閱不再被 cleanup 回收 */
 export function claimContract(code: string) {
+    permanent.add(code);
     temporary.delete(code);
 }
 
@@ -45,12 +50,14 @@ export function claimContract(code: string) {
 export async function ensureContractTemporary(
     code: string,
 ): Promise<{ contract: ContractInfo; cleanup: () => void }> {
-    const ownedPermanently = subscribed.has(code) && !temporary.has(code);
     const contract = await ensureContract(code);
-    if (ownedPermanently) return { contract, cleanup: () => {} };
+    // await 之後才判定：解析期間可能已被 primeContract/claimContract 認領為永久
+    // （TOCTOU）。已永久持有就不接管其生命週期，cleanup 為 no-op。
+    if (permanent.has(code)) return { contract, cleanup: () => {} };
     temporary.add(code);
     const cleanup = () => {
-        if (!temporary.has(code)) return; // 已升級為永久（加入追蹤/釘選）
+        // 認領後（加入追蹤/釘選）或非本次暫看持有 → 不退訂
+        if (permanent.has(code) || !temporary.has(code)) return;
         temporary.delete(code);
         subscribed.delete(code);
         void unsubscribeQuote(contract, 'Tick');
