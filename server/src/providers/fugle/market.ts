@@ -151,6 +151,13 @@ interface CacheEntry {
     fetchedAt: number;
     /** five-level book from the REST quote — seeds depth panels */
     book?: { bids: unknown[]; asks: unknown[] };
+    /**
+     * 深度面板是否已拿到首份五檔（REST seed 推送過、或 WS books 已開始流）。
+     * seedBookWithRetry 的停止條件——不能看 `book`（WS books handler 從不寫
+     * book，只更新 state.bid/ask），否則即時五檔在跑時 retry 仍判定「沒補上」
+     * 而每輪空打一次節流 REST。
+     */
+    seeded?: boolean;
 }
 
 export class FugleMarketDataProvider implements MarketDataProvider {
@@ -478,6 +485,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             if (entry) {
                 entry.state.bid = Number(data.bids?.[0]?.price) || entry.state.bid;
                 entry.state.ask = Number(data.asks?.[0]?.price) || entry.state.ask;
+                entry.seeded = true; // 即時五檔已在流 — 停掉 seed 退避重試
             }
             const appCode = fromFugleSymbol(symbol);
             if (appCode !== symbol) bidask.code = appCode;
@@ -1221,7 +1229,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         if (attempt >= delays.length) return;
         setTimeout(() => {
             if (!this.subs.get(symbol)?.has('BidAsk')) return; // 已退訂
-            if (this.quoteCache.get(symbol)?.book) return; // 已被 WS/seed 補上
+            if (this.quoteCache.get(symbol)?.seeded) return; // 已被 WS/seed 補上
             void this.fetchQuote(symbol).then((e) => {
                 if (e?.book) this.pushBookSeed(symbol, e.book);
                 else this.seedBookWithRetry(symbol, attempt + 1);
@@ -1233,6 +1241,8 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         symbol: string,
         book: { bids: unknown[]; asks: unknown[] },
     ): void {
+        const entry = this.quoteCache.get(symbol);
+        if (entry) entry.seeded = true; // REST 五檔已推送 — 停掉退避重試
         const bidask = bidaskFromBooks(symbol, {
             bids: book.bids,
             asks: book.asks,
