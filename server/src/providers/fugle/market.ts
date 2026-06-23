@@ -629,6 +629,11 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             .sort((a, b) => a.month.localeCompare(b.month));
         // 依順位取：近月(1)=最近未到期、次月(2)=下一個、遠月(3)=再下一個…
         const current = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+        // 月粒度比較用 `>=` 是刻意的：結算月(每月第三個週三)在交割日當天
+        // 仍可交易,近月就該是它(交易員結算前平倉);結算後上游 tickers 隔日
+        // 即下架該合約,candidates 自然不再含它 → `>=` 與下架時點對齊,實務上
+        // 不會選到已過期月。**勿改成 `>`**,否則結算日當天 R1 會跳成下月、
+        // 破壞結算前平倉。(註:aliasMap 無 TTL 的跨日 stale 問題另案處理。)
         const nonExpired = scored.filter((x) => x.month >= current);
         const ordered = nonExpired.length > 0 ? nonExpired : scored;
         const rank = aliasMonthRank(code) || 1; // 1=近月
