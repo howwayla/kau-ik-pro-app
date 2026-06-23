@@ -23,11 +23,21 @@ function fmt(v: unknown): string {
     return String(num(v));
 }
 
-function pad(n: number): string {
-    return String(n).padStart(2, '0');
-}
+// Asia/Taipei wall-clock 格式化器 — splitTime 不可依賴 host 時區：前端的
+// tickMs 與日夜盤 guard 都假設 tick.time 是台北時間；若 server 跑在 UTC/雲端、
+// 用 getHours() 會漂 8 小時 → 開盤後即時 tick 被靜默過濾/畫錯盤別。
+const TPE_PARTS = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+});
 
-/** fugle microsecond epoch (or ms) → {date:'YYYY-MM-DD', time:'HH:mm:ss.ffffff'} */
+/** fugle microsecond epoch (或 ms) → {date:'YYYY-MM-DD', time:'HH:mm:ss.ffffff'}（Asia/Taipei）*/
 export function splitTime(t: unknown): { date: string; time: string } {
     let ms = num(t);
     let micros = 0;
@@ -36,9 +46,15 @@ export function splitTime(t: unknown): { date: string; time: string } {
         ms = Math.floor(ms / 1000);
     }
     const d = ms > 0 ? new Date(ms) : new Date();
+    const p: Record<string, string> = {};
+    for (const part of TPE_PARTS.formatToParts(d)) {
+        if (part.type !== 'literal') p[part.type] = part.value;
+    }
+    // 秒以下精度與時區無關 — 微秒沿用 epoch 計算
+    const sub = String(micros || d.getMilliseconds() * 1000).padStart(6, '0');
     return {
-        date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-        time: `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(micros || d.getMilliseconds() * 1000).padStart(6, '0')}`,
+        date: `${p.year}-${p.month}-${p.day}`,
+        time: `${p.hour}:${p.minute}:${p.second}.${sub}`,
     };
 }
 
