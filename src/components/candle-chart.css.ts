@@ -217,6 +217,18 @@ export const chartHost = style({
     position: 'relative',
 });
 
+export const legend = style({
+    position: 'absolute',
+    top: '6px',
+    left: '10px',
+    zIndex: 5,
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '0.64rem',
+    letterSpacing: '0.03em',
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+});
+
 export const emptyMsg = style({
     position: 'absolute',
     inset: 0,

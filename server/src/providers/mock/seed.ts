@@ -134,6 +134,16 @@ export function buildInstruments(now = new Date()): Map<string, SeedInstrument> 
         multiplier: 1,
         target_code: null,
     });
+    map.set('101', {
+        code: '101',
+        name: '櫃買指數',
+        exchange: 'OTC',
+        security_type: 'IND',
+        reference: 420,
+        category: '',
+        multiplier: 1,
+        target_code: null,
+    });
 
     const [front] = frontMonths(now);
     const futRef = INDEX_REFERENCE + TXF_BASIS;

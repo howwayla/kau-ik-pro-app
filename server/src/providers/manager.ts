@@ -11,12 +11,15 @@ import type {
     ContractInfo,
     CreditEnquire,
     HistoryTicks,
+    MarketSession,
+    VolumeLevel,
     KBars,
     OptContract,
     ScannerItem,
     ScannerType,
     SecurityType,
     ShortSource,
+    SymbolHit,
     Snapshot,
     SseBidAsk,
     SseTick,
@@ -24,6 +27,7 @@ import type {
 import type {
     BidAskChannel,
     ContractKey,
+    DailyClose,
     MarketDataProvider,
     StreamQuoteType,
     TickChannel,
@@ -150,8 +154,47 @@ export class MarketManager implements MarketDataProvider, PriceFeed {
         return this.active.snapshots(keys);
     }
 
-    kbars(key: ContractKey, start: string, end: string): Promise<KBars> {
-        return this.active.kbars(key, start, end);
+    kbars(
+        key: ContractKey,
+        start: string,
+        end: string,
+        session?: MarketSession,
+    ): Promise<KBars> {
+        return this.active.kbars(key, start, end, session);
+    }
+
+    /**
+     * 還原日收盤 — 來源沒實作（mock）時退回 kbars：把查詢窗拉寬到
+     * 100 天以上讓 kbars 走日 K timeframe，再裁回 [start, end]。
+     * fallback 為未還原價，配息會以缺口呈現。
+     */
+    async dailyCloses(
+        key: ContractKey,
+        start: string,
+        end: string,
+    ): Promise<DailyClose[]> {
+        if (this.active.dailyCloses) {
+            return this.active.dailyCloses(key, start, end);
+        }
+        const endMs = new Date(end).getTime();
+        const wideStart = new Date(Math.min(new Date(start).getTime(), endMs - 110 * 86_400_000))
+            .toISOString()
+            .slice(0, 10);
+        const kb = await this.active.kbars(key, wideStart, end);
+        const out: DailyClose[] = [];
+        for (let i = 0; i < kb.datetime.length; i += 1) {
+            const date = (kb.datetime[i] ?? '').slice(0, 10);
+            if (!date || date < start || date > end) continue;
+            const close = kb.Close[i];
+            if (close === undefined || !Number.isFinite(close) || close <= 0) {
+                continue;
+            }
+            const prev = out[out.length - 1];
+            // 同日多根（保險）→ 留最後一根
+            if (prev && prev.date === date) prev.close = close;
+            else out.push({ date, close });
+        }
+        return out;
     }
 
     ticks(
@@ -160,6 +203,14 @@ export class MarketManager implements MarketDataProvider, PriceFeed {
         lastCount?: number,
     ): Promise<HistoryTicks> {
         return this.active.ticks(key, date, lastCount);
+    }
+
+    volumes(key: ContractKey): Promise<VolumeLevel[]> {
+        return this.active.volumes(key);
+    }
+
+    searchSymbols(query: string): Promise<SymbolHit[]> {
+        return this.active.searchSymbols(query);
     }
 
     scanner(

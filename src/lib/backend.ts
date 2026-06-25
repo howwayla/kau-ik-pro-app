@@ -28,8 +28,8 @@ import type {
     Margin,
     StockPosition,
 } from './types/portfolio';
-import { registerSubscription } from './stream';
-import type { HistoryTicks } from './types/tick';
+import { registerSubscription, unregisterSubscription } from './stream';
+import type { HistoryTicks, VolumeLevel } from './types/tick';
 import { todayStr } from './utils/date';
 
 export interface ServerInfo {
@@ -174,11 +174,31 @@ export function fetchSnapshots(contracts: ContractBase[]) {
     });
 }
 
-export function fetchKbars(contract: ContractBase, start: string, end: string) {
+export type MarketSession = 'day' | 'afterhours' | 'all';
+
+export interface SymbolHit {
+    code: string;
+    name: string;
+    type: 'STK' | 'FUT' | 'OPT' | 'IND' | null;
+}
+
+export function fetchSymbolSearch(q: string) {
+    return apiGet<SymbolHit[]>(
+        `/api/v1/data/search?q=${encodeURIComponent(q)}`,
+    );
+}
+
+export function fetchKbars(
+    contract: ContractBase,
+    start: string,
+    end: string,
+    session?: MarketSession,
+) {
     return apiPost<KBars>('/api/v1/data/kbars', {
         contract: contractKey(contract),
         start,
         end,
+        ...(session ? { session } : {}),
     });
 }
 
@@ -186,6 +206,12 @@ export function fetchHistoryTicks(contract: ContractBase, date: string) {
     return apiPost<HistoryTicks>('/api/v1/data/ticks', {
         contract: contractKey(contract),
         date,
+    });
+}
+
+export function fetchVolumes(contract: ContractBase) {
+    return apiPost<VolumeLevel[]>('/api/v1/data/volumes', {
+        contract: contractKey(contract),
     });
 }
 
@@ -235,6 +261,7 @@ export function unsubscribeQuote(
     contract: ContractBase,
     quoteType: QuoteTypeName,
 ) {
+    unregisterSubscription(contract.code, quoteType);
     return apiPost<SubscriptionResponse>('/api/v1/stream/unsubscribe', {
         ...contractKey(contract),
         target_code: contract.target_code ?? null,

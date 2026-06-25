@@ -150,6 +150,20 @@ export class MockMarketEngine {
             .map((i) => i.code);
     }
 
+    searchSymbols(query: string): { code: string; name: string }[] {
+        const q = query.trim().toLowerCase();
+        if (!q) return [];
+        return [...this.instruments.values()]
+            .filter((i) => i.security_type === 'STK')
+            .filter(
+                (i) =>
+                    i.code.toLowerCase().startsWith(q) ||
+                    i.name.includes(query.trim()),
+            )
+            .slice(0, 20)
+            .map((i) => ({ code: i.code, name: i.name }));
+    }
+
     private resolve(code: string): SeedInstrument {
         const inst = this.instruments.get(code);
         if (!inst) throw new Error(`unknown instrument: ${code}`);

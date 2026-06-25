@@ -19,7 +19,9 @@ import type {
     CreditEnquire,
     HistoryTicks,
     KBars,
+    MarketSession,
     OptContract,
+    VolumeLevel,
     ScannerItem,
     ScannerType,
     SecurityType,
@@ -27,10 +29,12 @@ import type {
     Snapshot,
     SseBidAsk,
     SseTick,
+    SymbolHit,
 } from '../../types/dto.ts';
 import type {
     BidAskChannel,
     ContractKey,
+    DailyClose,
     MarketClientSource,
     MarketDataProvider,
     StreamQuoteType,
@@ -51,6 +55,7 @@ import {
     deliveryMonthOf,
     fromFugleSymbol,
     isContinuousAlias,
+    aliasMonthRank,
     aliasPrefix,
     parseTaifexOption,
     toFugleSymbol,
@@ -58,9 +63,39 @@ import {
 
 const QUOTE_TTL_MS = 10_000;
 const OPT_QUOTE_TTL_MS = 60_000;
+// 行情 REST quote 並發上限：富邦行情後端對「大量同時 quote」會整批失敗
+//（自選清單一次載入 30+ 檔 → seed 全空白、盤後尤其明顯）。限同時在途數
+// 把突發攤平、配合 in-flight 去重與 seed 退避重試，讓批次載入可靠 seed。
+const REST_QUOTE_CONCURRENCY = 3;
 const TICKERS_TTL_MS = 10 * 60_000;
 const WS_CONNECT_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 10_000;
+
+/** minutes-from-midnight in Asia/Taipei (timezone-safe regardless of host TZ) */
+function taipeiMinutes(now: Date): number {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Taipei',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(now);
+    const h =
+        Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+    const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+    return h * 60 + m;
+}
+
+/**
+ * 期貨/選擇權現在是否該看夜盤（盤後）行情。
+ * 台指夜盤 15:00–次日 05:00；空窗期以「最近收盤的那一盤」為準：
+ *   08:45–13:45 日盤(live) / 13:45–15:00 取日盤收盤 → 日盤
+ *   15:00–05:00 夜盤(live) / 05:00–08:45 取夜盤收盤 → 夜盤
+ * 週末無夜盤，API 會回最後一盤資料，這裡不特別處理。
+ */
+function isAfterHoursNow(now = new Date()): boolean {
+    const min = taipeiMinutes(now);
+    return min >= 15 * 60 || min < 8 * 60 + 45;
+}
 
 // the SDK's ws.connect() promise only settles on (un)authenticated events —
 // network errors, closes, and unexpected auth replies leave it pending
@@ -116,6 +151,13 @@ interface CacheEntry {
     fetchedAt: number;
     /** five-level book from the REST quote — seeds depth panels */
     book?: { bids: unknown[]; asks: unknown[] };
+    /**
+     * 深度面板是否已拿到首份五檔（REST seed 推送過、或 WS books 已開始流）。
+     * seedBookWithRetry 的停止條件——不能看 `book`（WS books handler 從不寫
+     * book，只更新 state.bid/ask），否則即時五檔在跑時 retry 仍判定「沒補上」
+     * 而每輪空打一次節流 REST。
+     */
+    seeded?: boolean;
 }
 
 export class FugleMarketDataProvider implements MarketDataProvider {
@@ -125,11 +167,17 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     private sdk: any;
 
     private quoteCache = new Map<string, CacheEntry>(); // by fugle symbol
+    // REST quote 並發節流 + 同符號 in-flight 去重
+    private restActive = 0;
+    private restWaiters: Array<() => void> = [];
+    private quoteInflight = new Map<string, Promise<CacheEntry | null>>();
     private contractCache = new Map<string, ContractInfo>();
     private optChain: OptContract[] | null = null;
     private optChainAt = 0;
+    private optChainAh = false; // 上次抓 optChain 是否夜盤（快取分盤別）
     private futTickers: any[] | null = null;
     private futTickersAt = 0;
+    private futTickersAh = false; // 上次抓 futTickers 是否夜盤（快取分盤別）
     private aliasMap = new Map<string, string>(); // TXFR1 → TXFF6
 
     private subs = new Map<string, Set<StreamQuoteType>>(); // by fugle symbol
@@ -137,6 +185,14 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     private bidaskCbs: ((ch: BidAskChannel, b: SseBidAsk) => void)[] = [];
     private disposed = false;
     private wsFailedUntil = 0; // fail fast instead of re-timing-out per subscribe
+    // 期貨/選擇權 WS 連線目前綁的盤別（true=夜盤）；翻盤時要重連換 afterHours
+    private futoptAfterHours: boolean | null = null;
+    private sessionWatch: ReturnType<typeof setInterval> | null = null;
+    // 每條 WS 最後收到封包的時間 — 偵測睡眠後的殭屍連線（連線還在但沒資料）
+    private lastWsMsgAt: { stock: number; futopt: number } = {
+        stock: 0,
+        futopt: 0,
+    };
 
     /** a Fugle API key, or broker-SDK-backed clients (see MarketClientSource) */
     constructor(private source: string | MarketClientSource) {}
@@ -168,10 +224,72 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 `行情 API 回應異常: ${JSON.stringify(probe).slice(0, 200)}`,
             );
         }
+        // WS 看門狗：①日↔夜交界重連 futopt 換 afterHours；②偵測睡眠後的
+        // 殭屍連線（market 開著、有訂閱、卻 >45s 沒收到任何封包）並重連。
+        // 後者解決「整夜閒置 → 個股停在 13:30、refresh 無效」（連線還在但
+        // 已死、subscribe() 對既有訂閱 early-return 不會重連）。
+        const STALE_MS = 45_000;
+        this.sessionWatch = setInterval(() => {
+            if (this.disposed) return;
+            // ① futopt 盤別翻轉
+            if (
+                this.futoptWs &&
+                this.futoptAfterHours !== null &&
+                isAfterHoursNow() !== this.futoptAfterHours
+            ) {
+                void this.forceReconnect('futopt');
+                return; // 重連即會刷新時戳，這輪不再判殭屍
+            }
+            // ② 殭屍連線偵測
+            const now = Date.now();
+            for (const kind of ['stock', 'futopt'] as const) {
+                const ws = kind === 'stock' ? this.stockWs : this.futoptWs;
+                if (!ws || !this.hasSubsFor(kind)) continue;
+                if (!this.marketOpen(kind)) continue; // 收盤沒資料是正常的
+                if (now - this.lastWsMsgAt[kind] > STALE_MS) {
+                    console.warn(
+                        `行情 WS(${kind}) 疑似殭屍（${Math.round(
+                            (now - this.lastWsMsgAt[kind]) / 1000,
+                        )}s 無封包）— 重連`,
+                    );
+                    // 先把時戳推到未來，避免重連完成前的下一輪又判殭屍重複觸發
+                    this.lastWsMsgAt[kind] = now;
+                    void this.forceReconnect(kind);
+                }
+            }
+        }, 20_000);
+    }
+
+    /**
+     * 強制重建某條 WS。**不能只呼叫 disconnect() 等 'close' 來重連** —
+     * 實測 esun WS 的 disconnect() 不會觸發 'close' 事件，靠 close handler
+     * 重連的鏈永遠不啟動 → stockWs 一直指著死連線、watchdog 無限重連迴圈、
+     * live feed 全死（2026-06-16 回歸）。改為主動 null ref + 移除舊 listener
+     *（防舊連線稍後的 close 把新連線歸零）+ 直接 resubscribe。
+     */
+    private async forceReconnect(kind: 'stock' | 'futopt'): Promise<void> {
+        const ws = kind === 'stock' ? this.stockWs : this.futoptWs;
+        if (kind === 'stock') this.stockWs = null;
+        else this.futoptWs = null;
+        try {
+            ws?.removeAllListeners?.();
+        } catch {
+            /* not an emitter */
+        }
+        try {
+            ws?.disconnect?.();
+        } catch {
+            /* already closed */
+        }
+        if (!this.disposed) await this.resubscribe(kind);
     }
 
     dispose(): void {
         this.disposed = true;
+        if (this.sessionWatch) {
+            clearInterval(this.sessionWatch);
+            this.sessionWatch = null;
+        }
         try {
             this.stockWs?.disconnect?.();
         } catch { /* already closed */ }
@@ -203,6 +321,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 : await this.source.makeWs();
         const ws = kind === 'stock' ? client.stock : client.futopt;
         ws.on('message', (raw: any) => {
+            this.lastWsMsgAt[kind] = Date.now();
             try {
                 const msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
                 if (process.env.WS_DEBUG) {
@@ -243,9 +362,45 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             throw err;
         }
         this.wsFailedUntil = 0;
+        this.lastWsMsgAt[kind] = Date.now(); // fresh — don't trip the watchdog
         if (kind === 'stock') this.stockWs = ws;
-        else this.futoptWs = ws;
+        else {
+            this.futoptWs = ws;
+            this.futoptAfterHours = isAfterHoursNow(); // bind this connection's session
+        }
         return ws;
+    }
+
+    /** 該類商品現在是否在交易時段（殭屍偵測只在「該有資料卻沒資料」時重連） */
+    private marketOpen(kind: 'stock' | 'futopt'): boolean {
+        const min = taipeiMinutes(new Date());
+        if (kind === 'stock') return min >= 9 * 60 && min <= 13 * 60 + 30;
+        // futopt 日盤 08:45–13:45、夜盤 15:00–次日 05:00
+        return (
+            (min >= 8 * 60 + 45 && min <= 13 * 60 + 45) ||
+            min >= 15 * 60 ||
+            min < 5 * 60
+        );
+    }
+
+    private hasSubsFor(kind: 'stock' | 'futopt'): boolean {
+        for (const symbol of this.subs.keys()) {
+            if (this.wsKindFor(symbol) === kind) return true;
+        }
+        return false;
+    }
+
+    /** WS subscribe params; futopt carries the live-session afterHours flag */
+    private wsSubParams(symbol: string, channel: 'trades' | 'books') {
+        const params: {
+            channel: 'trades' | 'books';
+            symbol: string;
+            afterHours?: boolean;
+        } = { channel, symbol };
+        if (this.wsKindFor(symbol) === 'futopt' && isAfterHoursNow()) {
+            params.afterHours = true;
+        }
+        return params;
     }
 
     /** probe WS availability once; lets callers degrade to REST-only mode */
@@ -264,10 +419,10 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             for (const [symbol, quotes] of this.subs) {
                 if (this.wsKindFor(symbol) !== kind) continue;
                 if (quotes.has('Tick')) {
-                    ws.subscribe({ channel: 'trades', symbol });
+                    ws.subscribe(this.wsSubParams(symbol, 'trades'));
                 }
                 if (quotes.has('BidAsk')) {
-                    ws.subscribe({ channel: 'books', symbol });
+                    ws.subscribe(this.wsSubParams(symbol, 'books'));
                 }
             }
         } catch {
@@ -320,6 +475,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 });
             }
             const tick = tickFromTrade(symbol, data, state);
+            if (!tick) return; // 無可用價格的 frame（如收盤總結）不發送
             const appCode = fromFugleSymbol(symbol);
             if (appCode !== symbol) tick.code = appCode;
             for (const cb of this.tickCbs) cb(channels.tick, tick);
@@ -329,6 +485,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             if (entry) {
                 entry.state.bid = Number(data.bids?.[0]?.price) || entry.state.bid;
                 entry.state.ask = Number(data.asks?.[0]?.price) || entry.state.ask;
+                entry.seeded = true; // 即時五檔已在流 — 停掉 seed 退避重試
             }
             const appCode = fromFugleSymbol(symbol);
             if (appCode !== symbol) bidask.code = appCode;
@@ -338,8 +495,28 @@ export class FugleMarketDataProvider implements MarketDataProvider {
 
     // ---- REST quote cache ----
 
+    /** 並發節流：限制同時在途的 REST quote 數，把批次突發攤平 */
+    private async withQuoteSlot<T>(fn: () => Promise<T>): Promise<T> {
+        // slot 直接交棒：被喚醒者承接前一個釋出的 slot（不再自行 +1），只有
+        // 新進者才佔一個 slot；完成時有等待者就交棒（計數不動），否則才 -1。
+        // 如此 restActive 永不超過上限——避免「-1 之後、被喚醒者尚未 +1」
+        // 的 microtask 空檔被新進者插隊而瞬間衝破 3。
+        let awoken = false;
+        if (this.restActive >= REST_QUOTE_CONCURRENCY) {
+            await new Promise<void>((r) => this.restWaiters.push(r));
+            awoken = true;
+        }
+        if (!awoken) this.restActive += 1;
+        try {
+            return await fn();
+        } finally {
+            const next = this.restWaiters.shift();
+            if (next) next();
+            else this.restActive -= 1;
+        }
+    }
+
     private async fetchQuote(symbol: string): Promise<CacheEntry | null> {
-        const isFutopt = this.wsKindFor(symbol) === 'futopt';
         const ttl = symbol.startsWith('TXO') ? OPT_QUOTE_TTL_MS : QUOTE_TTL_MS;
         const cached = this.quoteCache.get(symbol);
         if (cached && Date.now() - cached.fetchedAt < ttl) return cached;
@@ -347,9 +524,29 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         if (cached && Date.now() - cached.state.lastUpdatedMs < QUOTE_TTL_MS) {
             return cached;
         }
+        // 同符號去重：seed 與 snapshot 同檔同時打 → 共用一次 REST
+        const inflight = this.quoteInflight.get(symbol);
+        if (inflight) return inflight;
+        const task = this.withQuoteSlot(() => this.fetchQuoteRest(symbol, cached));
+        this.quoteInflight.set(symbol, task);
+        try {
+            return await task;
+        } finally {
+            this.quoteInflight.delete(symbol);
+        }
+    }
+
+    private async fetchQuoteRest(
+        symbol: string,
+        cached: CacheEntry | undefined,
+    ): Promise<CacheEntry | null> {
+        const isFutopt = this.wsKindFor(symbol) === 'futopt';
         try {
             const q = isFutopt
-                ? await this.rest.futopt.intraday.quote({ symbol })
+                ? await this.rest.futopt.intraday.quote({
+                      symbol,
+                      ...(isAfterHoursNow() ? { session: 'afterhours' } : {}),
+                  })
                 : await this.rest.stock.intraday.quote({ symbol });
             if (!q || q.statusCode >= 400 || !q.symbol) return cached ?? null;
             const entry: CacheEntry = {
@@ -390,13 +587,24 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     }
 
     private async futuresTickers(): Promise<any[]> {
-        if (this.futTickers && Date.now() - this.futTickersAt < TICKERS_TTL_MS) {
+        // 夜盤時段「日盤 tickers」回空 → 連續月 alias(TXFR1) 解析不出來、
+        // 整條期貨資料鏈斷掉。夜盤必須帶 session:'AFTERHOURS'。快取分盤別。
+        const ah = isAfterHoursNow();
+        if (
+            this.futTickers &&
+            this.futTickersAh === ah &&
+            Date.now() - this.futTickersAt < TICKERS_TTL_MS
+        ) {
             return this.futTickers;
         }
-        const res = await this.rest.futopt.intraday.tickers({ type: 'FUTURE' });
+        const res = await this.rest.futopt.intraday.tickers({
+            type: 'FUTURE',
+            ...(ah ? { session: 'AFTERHOURS' } : {}),
+        });
         this.warnIfForbidden(res);
         this.futTickers = Array.isArray(res?.data) ? res.data : [];
         this.futTickersAt = Date.now();
+        this.futTickersAh = ah;
         return this.futTickers!;
     }
 
@@ -410,7 +618,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             .map((t: any) => String(t.symbol ?? ''))
             .filter((s: string) => new RegExp(`^${prefix}[A-L]\\d$`).test(s));
         if (candidates.length === 0) return null;
-        // sort by delivery month and take the nearest non-expired
+        // sort by delivery month
         const now = new Date();
         const scored = candidates
             .map((s: string) => {
@@ -419,10 +627,19 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                 return { s, month };
             })
             .sort((a, b) => a.month.localeCompare(b.month));
+        // 依順位取：近月(1)=最近未到期、次月(2)=下一個、遠月(3)=再下一個…
         const current = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-        const front = scored.find((x) => x.month >= current) ?? scored[0]!;
-        this.aliasMap.set(code, front.s);
-        return front.s;
+        // 月粒度比較用 `>=` 是刻意的：結算月(每月第三個週三)在交割日當天
+        // 仍可交易,近月就該是它(交易員結算前平倉);結算後上游 tickers 隔日
+        // 即下架該合約,candidates 自然不再含它 → `>=` 與下架時點對齊,實務上
+        // 不會選到已過期月。**勿改成 `>`**,否則結算日當天 R1 會跳成下月、
+        // 破壞結算前平倉。(註:aliasMap 無 TTL 的跨日 stale 問題另案處理。)
+        const nonExpired = scored.filter((x) => x.month >= current);
+        const ordered = nonExpired.length > 0 ? nonExpired : scored;
+        const rank = aliasMonthRank(code) || 1; // 1=近月
+        const pick = ordered[rank - 1] ?? ordered[ordered.length - 1]!;
+        this.aliasMap.set(code, pick.s);
+        return pick.s;
     }
 
     aliasTarget(code: string): string | undefined {
@@ -441,7 +658,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         if (type === 'IND') {
             const entry = await this.fetchQuote(toFugleSymbol(code));
             if (entry) {
-                info = this.contractInfo(code, 'IND', 'TSE', entry.state);
+                info = this.contractInfo(code, 'IND', entry.exchange, entry.state);
             }
         } else if (type === 'STK') {
             if (/^[A-Z]/.test(code)) return null; // futures-style code — let FUT fallback handle it
@@ -518,10 +735,19 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     }
 
     async listOptionContracts(): Promise<OptContract[]> {
-        if (this.optChain && Date.now() - this.optChainAt < TICKERS_TTL_MS) {
+        // 夜盤同 futuresTickers：日盤 OPTION tickers 回空 → 夜盤帶 AFTERHOURS
+        const ah = isAfterHoursNow();
+        if (
+            this.optChain &&
+            this.optChainAh === ah &&
+            Date.now() - this.optChainAt < TICKERS_TTL_MS
+        ) {
             return this.optChain;
         }
-        const res = await this.rest.futopt.intraday.tickers({ type: 'OPTION' });
+        const res = await this.rest.futopt.intraday.tickers({
+            type: 'OPTION',
+            ...(ah ? { session: 'AFTERHOURS' } : {}),
+        });
         this.warnIfForbidden(res);
         const rows: any[] = Array.isArray(res?.data) ? res.data : [];
         const out: OptContract[] = [];
@@ -545,6 +771,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         }
         this.optChain = out;
         this.optChainAt = Date.now();
+        this.optChainAh = ah;
         return out;
     }
 
@@ -569,15 +796,20 @@ export class FugleMarketDataProvider implements MarketDataProvider {
     // historical quota (daily data is static intraday)
     private kbarsCache = new Map<string, { at: number; kbars: KBars }>();
 
-    async kbars(key: ContractKey, start: string, end: string): Promise<KBars> {
-        const cacheKey = `${key.code}:${start}:${end}`;
+    async kbars(
+        key: ContractKey,
+        start: string,
+        end: string,
+        session: MarketSession = 'all',
+    ): Promise<KBars> {
+        const cacheKey = `${key.code}:${start}:${end}:${session}`;
         const hit = this.kbarsCache.get(cacheKey);
         // 分鐘級（短區間）盤中會持續長新 K 棒 — 快取縮短到 1 分鐘
         const spanDays =
             (new Date(end).getTime() - new Date(start).getTime()) / 86_400_000;
         const ttl = spanDays <= 70 ? 60_000 : 10 * 60_000;
         if (hit && Date.now() - hit.at < ttl) return hit.kbars;
-        const out = await this.kbarsUncached(key, start, end);
+        const out = await this.kbarsUncached(key, start, end, session);
         if (out.datetime.length > 0) {
             if (this.kbarsCache.size > 50) this.kbarsCache.clear();
             this.kbarsCache.set(cacheKey, { at: Date.now(), kbars: out });
@@ -585,10 +817,62 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         return out;
     }
 
+    // 投組績效比較用：還原權息的日收盤（adjusted=true）。跟 K 線圖的
+    // kbars 分開 — 交易畫面要的是市場真實價格，績效比較要的是含息
+    // 報酬，混用任一邊都錯（0050 配息會被當成下跌缺口）。
+    private dailyClosesCache = new Map<
+        string,
+        { at: number; rows: DailyClose[] }
+    >();
+
+    async dailyCloses(
+        key: ContractKey,
+        start: string,
+        end: string,
+    ): Promise<DailyClose[]> {
+        const cacheKey = `${key.code}:${start}:${end}`;
+        const hit = this.dailyClosesCache.get(cacheKey);
+        if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rows;
+        // 官方查詢區間一次最長 1 年 — 超過一年的窗口分段抓再串接
+        const CHUNK_DAYS = 300;
+        const symbol = toFugleSymbol(key.code);
+        const endMs = new Date(end).getTime();
+        let fromMs = new Date(start).getTime();
+        let raw: any[] = [];
+        while (fromMs <= endMs) {
+            const toMs = Math.min(fromMs + CHUNK_DAYS * 86_400_000, endMs);
+            const res = await this.rest.stock.historical.candles({
+                symbol,
+                timeframe: 'D',
+                sort: 'asc',
+                adjusted: true,
+                from: new Date(fromMs).toISOString().slice(0, 10),
+                to: new Date(toMs).toISOString().slice(0, 10),
+            });
+            raw = raw.concat(res?.data ?? []);
+            fromMs = toMs + 86_400_000;
+        }
+        const rows: DailyClose[] = [];
+        for (const row of raw) {
+            const close = Number(row.close);
+            if (row.date && Number.isFinite(close) && close > 0) {
+                rows.push({ date: String(row.date).slice(0, 10), close });
+            }
+        }
+        if (rows.length > 0) {
+            if (this.dailyClosesCache.size > 50) {
+                this.dailyClosesCache.clear();
+            }
+            this.dailyClosesCache.set(cacheKey, { at: Date.now(), rows });
+        }
+        return rows;
+    }
+
     private async kbarsUncached(
         key: ContractKey,
         start: string,
         end: string,
+        session: MarketSession = 'all',
     ): Promise<KBars> {
         const symbol = isContinuousAlias(key.code)
             ? ((await this.resolveAlias(key.code)) ?? key.code)
@@ -598,9 +882,32 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             (new Date(end).getTime() - new Date(start).getTime()) / 86_400_000;
 
         if (isFutopt) {
-            // fugle has no historical futopt candles — intraday (today) only
-            const res = await this.rest.futopt.intraday.candles({ symbol });
-            return kbarsFromCandles(res?.data ?? [], false);
+            // fugle has no historical futopt candles — intraday (today) only.
+            // 日盤=無 session、夜盤=session:afterhours、全=兩段抓回來按時間接續。
+            const fetchSession = async (s?: 'afterhours'): Promise<any[]> => {
+                const res = await this.rest.futopt.intraday.candles({
+                    symbol,
+                    ...(s ? { session: s } : {}),
+                });
+                return res?.data ?? [];
+            };
+            let rows: any[];
+            if (session === 'day') {
+                rows = await fetchSession();
+            } else if (session === 'afterhours') {
+                rows = await fetchSession('afterhours');
+            } else {
+                const [day, night] = await Promise.all([
+                    fetchSession(),
+                    fetchSession('afterhours'),
+                ]);
+                // 同 cycle：日盤(08:45–13:45) → 夜盤(15:00–次日05:00)，
+                // 依 date(含時間) 排序接成連續序列
+                rows = [...day, ...night].sort((a, b) =>
+                    String(a.date).localeCompare(String(b.date)),
+                );
+            }
+            return kbarsFromCandles(rows, false);
         }
         // minute candles ignore from/to and return ~30 days; filter locally
         const timeframe =
@@ -639,8 +946,8 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             });
             raw = res?.data ?? [];
             // 歷史分K盤後才寫入（今日缺）— 用 intraday candles 補今日。
-            // 單位陷阱：historical volume=股、intraday volume=張（整股），
-            // 統一轉成股再併（興櫃 intraday 本來就是股、指數是金額）
+            // 單位（2026-06-12 同根棒比對驗證）：分K（1/5/15/60）歷史與
+            // 盤中 volume 同單位（整股=張、興櫃=股、指數=金額），直接併
             const localToday = new Date()
                 .toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
             const histHasToday = raw.some(
@@ -652,15 +959,7 @@ export class FugleMarketDataProvider implements MarketDataProvider {
                         symbol,
                         timeframe,
                     });
-                    const lots =
-                        key.security_type !== 'IND' &&
-                        key.exchange !== 'OES';
-                    const trows = (today?.data ?? []).map((r: any) =>
-                        lots
-                            ? { ...r, volume: (Number(r.volume) || 0) * 1000 }
-                            : r,
-                    );
-                    raw = raw.concat(trows);
+                    raw = raw.concat(today?.data ?? []);
                 } catch {
                     // 盤前/假日無今日資料 — 歷史照常
                 }
@@ -671,7 +970,12 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             return d >= start && d <= end;
         });
         const isIndex = key.security_type === 'IND';
-        return kbarsFromCandles(rows, !isIndex);
+        // 股→張只在「日K（歷史日K volume=股）」與「興櫃分K（=股）」需要；
+        // 上市櫃分K原生就是張，再除 1000 會把量整片砍成 0
+        return kbarsFromCandles(
+            rows,
+            !isIndex && (timeframe === 'D' || key.exchange === 'OES'),
+        );
     }
 
     async ticks(
@@ -689,15 +993,26 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             ask_volume: [],
             tick_type: [],
         };
-        const today = new Date().toISOString().slice(0, 10);
-        if (date !== today) return out; // fugle serves intraday trades only
         const symbol = isContinuousAlias(key.code)
             ? ((await this.resolveAlias(key.code)) ?? key.code)
             : toFugleSymbol(key.code);
         const isFutopt = this.wsKindFor(symbol) === 'futopt';
+        // fugle 只服務「當日 intraday」逐筆。股票用台北日期比對（不可用
+        // UTC，否則台北半夜會比成前一天 → 整片回空）。期貨/選擇權夜盤跨
+        // 午夜、掛在次交易日，intraday 端點本來就只回當下這盤 → 不 gate 日期，
+        // session 由 isAfterHoursNow 決定日盤/夜盤。
+        if (!isFutopt) {
+            const today = new Date().toLocaleDateString('sv-SE', {
+                timeZone: 'Asia/Taipei',
+            });
+            if (date !== today) return out;
+        }
         try {
             const res = isFutopt
-                ? await this.rest.futopt.intraday.trades({ symbol })
+                ? await this.rest.futopt.intraday.trades({
+                      symbol,
+                      ...(isAfterHoursNow() ? { session: 'afterhours' } : {}),
+                  })
                 : await this.rest.stock.intraday.trades({
                       symbol,
                       limit: lastCount ?? 1000,
@@ -792,6 +1107,84 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         );
     }
 
+    /** 官方分價量表（intraday/volumes，全日交易所級）。期貨無內外盤欄位 */
+    async volumes(key: ContractKey): Promise<VolumeLevel[]> {
+        if (key.security_type === 'IND') return [];
+        const symbol = isContinuousAlias(key.code)
+            ? ((await this.resolveAlias(key.code)) ?? key.code)
+            : toFugleSymbol(key.code);
+        const isFutopt = this.wsKindFor(symbol) === 'futopt';
+        try {
+            const res = isFutopt
+                ? await this.rest.futopt.intraday.volumes({
+                      symbol,
+                      ...(isAfterHoursNow() ? { session: 'afterhours' } : {}),
+                  })
+                : await this.rest.stock.intraday.volumes({ symbol });
+            const rows: any[] = res?.data ?? [];
+            return rows
+                .map((r) => ({
+                    price: Number(r.price) || 0,
+                    volume: Number(r.volume) || 0,
+                    at_bid: Number(r.volumeAtBid) || 0,
+                    at_ask: Number(r.volumeAtAsk) || 0,
+                }))
+                .filter((r) => r.price > 0 && r.volume > 0);
+        } catch {
+            return []; // 前端 fallback 用逐筆累計
+        }
+    }
+
+    // ---- 代碼/名稱搜尋（加追蹤用）----
+    private symbolDir: { code: string; name: string }[] | null = null;
+    private symbolDirAt = 0;
+
+    private async ensureSymbolDir(): Promise<{ code: string; name: string }[]> {
+        if (this.symbolDir && Date.now() - this.symbolDirAt < 12 * 3600_000) {
+            return this.symbolDir;
+        }
+        const all: { code: string; name: string }[] = [];
+        for (const market of ['TSE', 'OTC']) {
+            try {
+                const res = await this.rest.stock.intraday.tickers({
+                    type: 'EQUITY',
+                    market,
+                });
+                for (const r of res?.data ?? []) {
+                    const code = String(r.symbol ?? '');
+                    const name = String(r.name ?? '');
+                    if (code) all.push({ code, name });
+                }
+            } catch {
+                // 該市場抓不到就略過，有多少用多少
+            }
+        }
+        if (all.length) {
+            this.symbolDir = all;
+            this.symbolDirAt = Date.now();
+        }
+        return this.symbolDir ?? [];
+    }
+
+    async searchSymbols(query: string): Promise<SymbolHit[]> {
+        const q = query.trim();
+        if (!q) return [];
+        const dir = await this.ensureSymbolDir();
+        const lower = q.toLowerCase();
+        const hits = dir.filter(
+            (s) =>
+                s.code.toLowerCase().startsWith(lower) || s.name.includes(q),
+        );
+        const rank = (s: { code: string; name: string }) =>
+            s.code === q ? 0 : s.code.toLowerCase().startsWith(lower) ? 1 : 2;
+        hits.sort((a, b) => rank(a) - rank(b) || a.code.localeCompare(b.code));
+        return hits.slice(0, 20).map((s) => ({
+            code: s.code,
+            name: s.name,
+            type: 'STK' as const,
+        }));
+    }
+
     // credit/short-source data has no fugle source — frontend handles empty
     async creditEnquire(_keys: ContractKey[]): Promise<CreditEnquire[]> {
         return [];
@@ -817,26 +1210,53 @@ export class FugleMarketDataProvider implements MarketDataProvider {
             set = new Set();
             this.subs.set(symbol, set);
         }
-        if (set.has(quote)) return;
+        if (set.has(quote)) return; // 已訂閱：去重在 seed「之前」，避免重連/
+        // 重整對既有訂閱重發 subscribe 時，每次又起一條 seedBookWithRetry
+        // 退避鏈（在並發節流下放大 REST 呼叫）。首次 seed 失敗的補救由那條
+        // 既有的退避鏈接手，不靠重發 subscribe。
         set.add(quote);
-        // seed day state so the first WS tick has open/high/low context
+        // seed day state so the first WS tick has open/high/low context.
+        // fetchQuote 有 TTL cache；只在首次訂閱該 quote 類型時補 seed。
         const entry = await this.fetchQuote(symbol);
         // REST quote 已帶最後五檔 — 直接 seed 深度面板，不必等 WS snapshot
-        if (quote === 'BidAsk' && entry?.book) {
-            const bidask = bidaskFromBooks(symbol, {
-                bids: entry.book.bids,
-                asks: entry.book.asks,
-            });
-            const appCode = fromFugleSymbol(symbol);
-            if (appCode !== symbol) bidask.code = appCode;
-            const channels = this.channelFor(symbol);
-            for (const cb of this.bidaskCbs) cb(channels.bidask, bidask);
+        if (quote === 'BidAsk') {
+            if (entry?.book) this.pushBookSeed(symbol, entry.book);
+            // 無 book（批次載入時被節流擠掉、或上游瞬斷）→ 退避重試補 seed，
+            // 不讓深度面板永遠空白
+            else this.seedBookWithRetry(symbol);
         }
         const ws = await this.ensureWs(this.wsKindFor(symbol));
-        ws.subscribe({
-            channel: quote === 'Tick' ? 'trades' : 'books',
-            symbol,
+        ws.subscribe(this.wsSubParams(symbol, quote === 'Tick' ? 'trades' : 'books'));
+    }
+
+    /** 退避重試補五檔 seed：批次載入被節流擠掉時，等負載退去再補 */
+    private seedBookWithRetry(symbol: string, attempt = 0): void {
+        const delays = [2000, 4000, 8000, 14000];
+        if (attempt >= delays.length) return;
+        setTimeout(() => {
+            if (!this.subs.get(symbol)?.has('BidAsk')) return; // 已退訂
+            if (this.quoteCache.get(symbol)?.seeded) return; // 已被 WS/seed 補上
+            void this.fetchQuote(symbol).then((e) => {
+                if (e?.book) this.pushBookSeed(symbol, e.book);
+                else this.seedBookWithRetry(symbol, attempt + 1);
+            });
+        }, delays[attempt]);
+    }
+
+    private pushBookSeed(
+        symbol: string,
+        book: { bids: unknown[]; asks: unknown[] },
+    ): void {
+        const entry = this.quoteCache.get(symbol);
+        if (entry) entry.seeded = true; // REST 五檔已推送 — 停掉退避重試
+        const bidask = bidaskFromBooks(symbol, {
+            bids: book.bids,
+            asks: book.asks,
         });
+        const appCode = fromFugleSymbol(symbol);
+        if (appCode !== symbol) bidask.code = appCode;
+        const channels = this.channelFor(symbol);
+        for (const cb of this.bidaskCbs) cb(channels.bidask, bidask);
     }
 
     async unsubscribe(key: ContractKey, quote: StreamQuoteType): Promise<void> {
@@ -844,6 +1264,12 @@ export class FugleMarketDataProvider implements MarketDataProvider {
         const set = this.subs.get(symbol);
         if (!set?.delete(quote)) return;
         if (set.size === 0) this.subs.delete(symbol);
+        // 退訂深度後清掉 seeded：下次重訂才會重新 seed（否則殘留的 seeded
+        // 會讓 seedBookWithRetry 在尚未收到新五檔時就誤判已補上而提早停）
+        if (quote === 'BidAsk') {
+            const entry = this.quoteCache.get(symbol);
+            if (entry) entry.seeded = false;
+        }
         const ws = this.wsKindFor(symbol) === 'stock' ? this.stockWs : this.futoptWs;
         ws?.unsubscribe?.({
             channel: quote === 'Tick' ? 'trades' : 'books',

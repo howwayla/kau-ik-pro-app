@@ -15,6 +15,12 @@ const TSE_INDEX = {
     code: '001',
     target_code: null,
 };
+const OTC_INDEX = {
+    security_type: 'IND' as const,
+    exchange: 'OTC' as const,
+    code: '101',
+    target_code: null,
+};
 const TXF = {
     security_type: 'FUT' as const,
     exchange: 'TAIFEX' as const,
@@ -24,13 +30,14 @@ const TXF = {
 
 export function MarketBar() {
     const { data } = usePoll<Snapshot[]>(
-        useCallback(() => fetchSnapshots([TSE_INDEX, TXF]), []),
+        useCallback(() => fetchSnapshots([TSE_INDEX, OTC_INDEX, TXF]), []),
         10000,
     );
     const txfLive = useQuote('TXFR1');
 
     const index = data?.find((s) => s.code === '001');
-    const txfSnap = data?.find((s) => s.code !== '001');
+    const otc = data?.find((s) => s.code === '101');
+    const txfSnap = data?.find((s) => s.code === 'TXFR1');
     const txfClose = txfLive?.tick
         ? Number(txfLive.tick.close)
         : txfSnap?.close;
@@ -40,6 +47,12 @@ export function MarketBar() {
     if (!index) return null;
     const dir =
         index.change_price > 0 ? 'up' : index.change_price < 0 ? 'down' : 'flat';
+    const otcDir =
+        !otc || otc.change_price === 0
+            ? 'flat'
+            : otc.change_price > 0
+              ? 'up'
+              : 'down';
     const basisDir =
         basis === undefined || basis === 0 ? 'flat' : basis > 0 ? 'up' : 'down';
 
@@ -51,6 +64,14 @@ export function MarketBar() {
                     {fmtPrice(index.close)} {fmtPct(index.change_rate)}
                 </span>
             </div>
+            {otc && (
+                <div className={styles.chip}>
+                    <span className={styles.chipLabel}>櫃買</span>
+                    <span className={panel.dirText[otcDir]}>
+                        {fmtPrice(otc.close)} {fmtPct(otc.change_rate)}
+                    </span>
+                </div>
+            )}
             {basis !== undefined && (
                 <div className={styles.chip} title='台指期 − 加權指數（價差）'>
                     <span className={styles.chipLabel}>基差</span>

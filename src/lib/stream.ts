@@ -119,17 +119,46 @@ export function registerSubscription(body: {
     subscriptionRegistry.set(`${body.code}:${body.quote_type}`, body);
 }
 
-async function resubscribeAll() {
+/** drop a subscription from the replay registry so reconnect won't re-add it */
+export function unregisterSubscription(code: string, quoteType: string) {
+    subscriptionRegistry.delete(`${code}:${quoteType}`);
+}
+
+let resubscribeTimer: ReturnType<typeof setTimeout> | null = null;
+let resubscribing = false;
+
+async function resubscribeAll(attempt = 0) {
+    // 同一時間只允許一條重試鏈。連線抖動會連續觸發 onopen，若不擋會疊出
+    // 多條並發 backoff 同時 re-POST 整個 registry，正好打在剛重啟、還在喘
+    // 的 server 上。in-flight 期間的重入直接略過——現有那條會 replay 全部
+    // 訂閱（含期間新註冊的），不漏。
+    if (attempt === 0) {
+        if (resubscribing) return;
+        resubscribing = true;
+    }
+    let failed = false;
     for (const body of subscriptionRegistry.values()) {
         try {
-            await fetch(`${base}/api/v1/stream/subscribe`, {
+            const res = await fetch(`${base}/api/v1/stream/subscribe`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
+            if (!res.ok) failed = true;
         } catch {
-            // server still down — next reconnect will retry
+            failed = true;
         }
+    }
+    // server 重啟瞬間 POST 可能落空，且連線若已恢復就不會再有
+    // onopen 來補發 — 自己重試，不能等用戶手動重整
+    if (failed && attempt < 5) {
+        resubscribeTimer = setTimeout(
+            () => void resubscribeAll(attempt + 1),
+            2000 * (attempt + 1),
+        );
+    } else {
+        resubscribeTimer = null;
+        resubscribing = false;
     }
 }
 

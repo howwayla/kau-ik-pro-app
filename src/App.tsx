@@ -33,7 +33,12 @@ import * as panel from './components/panel.css';
 import { useHotkeys } from './hooks/use-hotkeys';
 import { usePoll } from './hooks/use-poll';
 import { useWatchlist } from './hooks/use-watchlist';
-import { ensureContract, useContract } from './lib/contracts-cache';
+import {
+    claimContract,
+    ensureContract,
+    ensureContractTemporary,
+    useContract,
+} from './lib/contracts-cache';
 import { reportDailyPnl } from './lib/risk';
 import { openPopout } from './lib/tauri';
 import {
@@ -89,7 +94,9 @@ function useBlockContract(
 ): ContractInfo | null {
     const pinned = useContract(block.pin);
     useEffect(() => {
-        if (block.pin && !pinned) {
+        if (!block.pin) return;
+        claimContract(block.pin); // 釘選＝永久持有，避免被暫看 cleanup 回收
+        if (!pinned) {
             ensureContract(block.pin).catch(() =>
                 notify({
                     kind: 'err',
@@ -129,7 +136,19 @@ function BlockBody({
         case 'chart':
             return contract ? (
                 <>
-                    <QuoteBoard contract={contract} snapshot={snapshot} />
+                    <QuoteBoard
+                        contract={contract}
+                        snapshot={snapshot}
+                        watched={watchlistProps.items.some(
+                            (i) => i.contract.code === contract.code,
+                        )}
+                        onAddWatch={() =>
+                            void watchlistProps.onAdd(
+                                contract.code,
+                                contract.security_type,
+                            )
+                        }
+                    />
                     <CandleChart
                         contract={contract}
                         trades={dockProps.trades}
@@ -452,22 +471,37 @@ export default function App() {
         reportDailyPnl(unrealized + settle);
     }, [positionsPoll.data, marginPoll.data]);
 
+    // 點排行榜/搜尋只「選取檢視」，不自動加進追蹤清單（要加清單走 ＋ 鈕）。
+    // 暫看訂閱只保留「當前這一個」：切到別檔就退掉前一個，避免每點一檔
+    // 就永久累積一個 live 訂閱。已在追蹤/釘選的標的不受影響（cleanup no-op）。
+    const tempViewRef = useRef<{ code: string; cleanup: () => void } | null>(
+        null,
+    );
     const selectByCode = useCallback(
         async (code: string) => {
             const existing = items.find((i) => i.contract.code === code);
             if (existing) {
+                tempViewRef.current?.cleanup(); // 切回追蹤清單內標的 → 釋放暫看
+                tempViewRef.current = null;
                 setSelected(existing.contract);
                 return;
             }
             try {
-                const c = (await addSymbol(code, 'STK')) as ContractInfo;
-                setSelected(c);
+                const { contract, cleanup } =
+                    await ensureContractTemporary(code);
+                if (tempViewRef.current && tempViewRef.current.code !== code) {
+                    tempViewRef.current.cleanup(); // 退掉上一個暫看標的
+                }
+                tempViewRef.current = { code, cleanup };
+                setSelected(contract);
             } catch {
                 // unknown code from scanner — ignore
             }
         },
-        [items, addSymbol],
+        [items],
     );
+    // 卸載時退掉殘留的暫看訂閱
+    useEffect(() => () => tempViewRef.current?.cleanup(), []);
 
     const selectedSnapshot = useMemo(
         () => items.find((i) => i.contract.code === selected?.code)?.snapshot,

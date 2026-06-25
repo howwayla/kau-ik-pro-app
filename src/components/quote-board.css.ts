@@ -33,6 +33,31 @@ export const symbolName = style({
     whiteSpace: 'nowrap',
 });
 
+export const addWatchBtn = style({
+    marginTop: '3px',
+    alignSelf: 'flex-start',
+    fontFamily: vars.font.body,
+    fontSize: '0.64rem',
+    color: vars.color.accent,
+    background: 'transparent',
+    border: `1px solid ${vars.color.accent}`,
+    borderRadius: vars.radius.sm,
+    padding: '1px 6px',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    ':hover': {
+        background: vars.color.accentDim,
+    },
+});
+
+export const watchedTag = style({
+    marginTop: '3px',
+    alignSelf: 'flex-start',
+    fontSize: '0.62rem',
+    color: vars.color.mutedForeground,
+    whiteSpace: 'nowrap',
+});
+
 const bigPriceBase = style({
     fontFamily: vars.font.mono,
     fontSize: '1.9rem',

@@ -4,7 +4,9 @@ import type {
     ContractInfo,
     CreditEnquire,
     HistoryTicks,
+    VolumeLevel,
     KBars,
+    MarketSession,
     OptContract,
     ScannerItem,
     ScannerType,
@@ -13,6 +15,7 @@ import type {
     Snapshot,
     SseBidAsk,
     SseTick,
+    SymbolHit,
 } from '../types/dto.ts';
 
 export interface ContractKey {
@@ -32,6 +35,11 @@ export interface MarketClientSource {
     makeWs(): unknown | Promise<unknown>;
 }
 
+export interface DailyClose {
+    date: string; // YYYY-MM-DD
+    close: number;
+}
+
 export type StreamQuoteType = 'Tick' | 'BidAsk';
 export type TickChannel = 'tick_stk' | 'tick_fop';
 export type BidAskChannel = 'bidask_stk' | 'bidask_fop';
@@ -48,12 +56,21 @@ export interface MarketDataProvider {
     listOptionContracts(): Promise<OptContract[]>;
 
     snapshots(keys: ContractKey[]): Promise<Snapshot[]>;
-    kbars(key: ContractKey, start: string, end: string): Promise<KBars>;
+    kbars(
+        key: ContractKey,
+        start: string,
+        end: string,
+        session?: MarketSession,
+    ): Promise<KBars>;
+    /** 依代碼前綴或名稱子字串搜尋上市櫃標的（加追蹤用） */
+    searchSymbols(query: string): Promise<SymbolHit[]>;
     ticks(
         key: ContractKey,
         date: string,
         lastCount?: number,
     ): Promise<HistoryTicks>;
+    /** 官方分價量表（全日）；不支援的商品/來源回空陣列 */
+    volumes(key: ContractKey): Promise<VolumeLevel[]>;
     scanner(
         type: ScannerType,
         count: number,
@@ -70,6 +87,16 @@ export interface MarketDataProvider {
     unsubscribe(key: ContractKey, quote: StreamQuoteType): Promise<void>;
     onTick(cb: (channel: TickChannel, tick: SseTick) => void): void;
     onBidAsk(cb: (channel: BidAskChannel, bidask: SseBidAsk) => void): void;
+
+    /**
+     * 還原權息的日收盤序列（投組績效比較用）。沒實作的來源（mock）由
+     * manager 退回 kbars 日 K — 未還原，配息會以缺口呈現。
+     */
+    dailyCloses?(
+        key: ContractKey,
+        start: string,
+        end: string,
+    ): Promise<DailyClose[]>;
 
     /** last traded price from the live cache (used by paper trading) */
     lastPrice(code: string): number | undefined;
