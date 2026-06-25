@@ -624,6 +624,9 @@ function OrdersTable({
     const [sortState, setSortState] = useState<SortState<OrderSortKey> | null>(
         loadOrdersSortState,
     );
+    const [batch, setBatch] = useState(false);
+    const [picked, setPicked] = useState<Set<string>>(new Set());
+    const [batchBusy, setBatchBusy] = useState(false);
     const orderRows = useMemo<OrderDisplayRow[]>(
         () =>
             trades.map((trade, originalIndex) => ({
@@ -693,7 +696,6 @@ function OrdersTable({
             </th>
         );
     };
-
     if (trades.length === 0) {
         return <div className={styles.emptyState}>NO ORDERS · 無委託</div>;
     }
@@ -708,102 +710,210 @@ function OrdersTable({
             setCancelling(null);
         }
     };
+    // 可刪的（仍在委託中的）單
+    const active = trades.filter((t) => ACTIVE_STATUSES.has(t.status.status));
+    const toggle = (id: string) =>
+        setPicked((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    // 批次刪除指定一組委託：逐筆送、容錯（盤後/個別失敗不影響其餘）
+    const cancelMany = async (ids: string[]) => {
+        if (ids.length === 0 || batchBusy) return;
+        setBatchBusy(true);
+        try {
+            const r = await Promise.allSettled(ids.map((id) => cancelOrder(id)));
+            const ok = r.filter((x) => x.status === 'fulfilled').length;
+            notify({
+                kind: ok === ids.length ? 'ok' : 'err',
+                title: '🗑 批次刪單',
+                body: `成功 ${ok} / ${ids.length} 筆${
+                    ok < ids.length ? '（部分失敗，可能非交易時段）' : ''
+                }`,
+            });
+            setPicked(new Set());
+            setBatch(false);
+            onChanged();
+        } finally {
+            setBatchBusy(false);
+        }
+    };
+    const allPicked = active.length > 0 && picked.size === active.length;
     return (
-        <table className={styles.table}>
-            <thead>
-                <tr>
-                    {sortableHeader('symbol', '商品')}
-                    {sortableHeader('action', '買賣')}
-                    {sortableHeader('price', '價格')}
-                    {sortableHeader('quantity', '委託量')}
-                    <th scope='col' className={styles.th}>
-                        成交量
-                    </th>
-                    {sortableHeader('status', '狀態')}
-                    {sortableHeader('time', '時間')}
-                    <th scope='col' className={styles.th}>
-                        訊息
-                    </th>
-                    <th scope='col' className={styles.th} />
-                </tr>
-            </thead>
-            <tbody>
-                {sortedRows.map(({ trade: t, effectivePrice }) => {
-                    const st = t.status.status;
-                    return (
-                        <tr key={t.order.id}>
-                            <td className={styles.td}>
-                                <ResolvedSymbolCell
-                                    code={t.contract.code}
-                                    type={t.contract.security_type}
-                                    fallbackName={t.contract.name}
-                                />
-                            </td>
-                            <td
-                                className={`${styles.td} ${panel.dirText[t.order.action === 'Buy' ? 'up' : 'down']}`}
-                            >
-                                {t.order.action === 'Buy' ? '買' : '賣'}
-                            </td>
-                            <td className={styles.td}>
-                                {fmtPrice(effectivePrice)}
-                            </td>
-                            <td className={`${styles.td} ${SENSITIVE}`}>
-                                {fmtInt(t.order.quantity)}
-                            </td>
-                            <td className={`${styles.td} ${SENSITIVE}`}>
-                                {fmtInt(t.status.deal_quantity)}
-                            </td>
-                            <td className={styles.td}>
-                                <span
-                                    className={
-                                        styles.statusChip[statusKind(st)]
+        <>
+            <div className={styles.orderBar}>
+                <span className={styles.orderBarInfo}>
+                    委託中 {active.length} 筆
+                </span>
+                {batch ? (
+                    <>
+                        <button
+                            className={styles.cancelBtn}
+                            disabled={batchBusy || picked.size === 0}
+                            onClick={() => void cancelMany([...picked])}
+                        >
+                            刪除選取 {picked.size > 0 ? `(${picked.size})` : ''}
+                        </button>
+                        <button
+                            className={styles.cancelBtn}
+                            disabled={batchBusy || active.length === 0}
+                            onClick={() =>
+                                void cancelMany(active.map((t) => t.order.id))
+                            }
+                        >
+                            全部刪單 ({active.length})
+                        </button>
+                        <button
+                            className={panel.btn}
+                            onClick={() => {
+                                setBatch(false);
+                                setPicked(new Set());
+                            }}
+                        >
+                            取消
+                        </button>
+                    </>
+                ) : (
+                    <button
+                        className={panel.btn}
+                        disabled={active.length === 0}
+                        onClick={() => setBatch(true)}
+                    >
+                        批次刪單
+                    </button>
+                )}
+            </div>
+            <table className={styles.table}>
+                <thead>
+                    <tr>
+                        {batch && (
+                            <th scope='col' className={styles.th}>
+                                <input
+                                    type='checkbox'
+                                    checked={allPicked}
+                                    onChange={() =>
+                                        setPicked(
+                                            allPicked
+                                                ? new Set()
+                                                : new Set(
+                                                      active.map(
+                                                          (t) => t.order.id,
+                                                      ),
+                                                  ),
+                                        )
                                     }
-                                >
-                                    {st}
-                                </span>
-                            </td>
-                            <td className={styles.td}>
-                                {fmtOrderTime(t.status.order_ts)}
-                            </td>
-                            <td
-                                className={styles.td}
-                                style={{
-                                    maxWidth: '16rem',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                }}
-                            >
-                                {t.status.msg || '—'}
-                            </td>
-                            <td className={styles.td}>
-                                {ACTIVE_STATUSES.has(st) && (
-                                    <>
-                                        <QtyEditor
-                                            trade={t}
-                                            onChanged={onChanged}
-                                        />{' '}
-                                        <button
-                                            className={styles.cancelBtn}
-                                            disabled={
-                                                cancelling === t.order.id
-                                            }
-                                            onClick={() =>
-                                                doCancel(t.order.id)
-                                            }
-                                        >
-                                            {cancelling === t.order.id
-                                                ? '…'
-                                                : 'CANCEL'}
-                                        </button>
-                                    </>
+                                />
+                            </th>
+                        )}
+                        {sortableHeader('symbol', '商品')}
+                        {sortableHeader('action', '買賣')}
+                        {sortableHeader('price', '價格')}
+                        {sortableHeader('quantity', '委託量')}
+                        <th scope='col' className={styles.th}>
+                            成交量
+                        </th>
+                        {sortableHeader('status', '狀態')}
+                        {sortableHeader('time', '時間')}
+                        <th scope='col' className={styles.th}>
+                            訊息
+                        </th>
+                        <th scope='col' className={styles.th} />
+                    </tr>
+                </thead>
+                <tbody>
+                    {sortedRows.map(({ trade: t, effectivePrice }) => {
+                        const st = t.status.status;
+                        const canCancel = ACTIVE_STATUSES.has(st);
+                        return (
+                            <tr key={t.order.id}>
+                                {batch && (
+                                    <td className={styles.td}>
+                                        {canCancel && (
+                                            <input
+                                                type='checkbox'
+                                                checked={picked.has(t.order.id)}
+                                                onChange={() =>
+                                                    toggle(t.order.id)
+                                                }
+                                            />
+                                        )}
+                                    </td>
                                 )}
-                            </td>
-                        </tr>
-                    );
-                })}
-            </tbody>
-        </table>
+                                <td className={styles.td}>
+                                    <ResolvedSymbolCell
+                                        code={t.contract.code}
+                                        type={t.contract.security_type}
+                                        fallbackName={t.contract.name}
+                                    />
+                                </td>
+                                <td
+                                    className={`${styles.td} ${panel.dirText[t.order.action === 'Buy' ? 'up' : 'down']}`}
+                                >
+                                    {t.order.action === 'Buy' ? '買' : '賣'}
+                                </td>
+                                <td className={styles.td}>
+                                    {fmtPrice(effectivePrice)}
+                                </td>
+                                <td className={`${styles.td} ${SENSITIVE}`}>
+                                    {fmtInt(t.order.quantity)}
+                                </td>
+                                <td className={`${styles.td} ${SENSITIVE}`}>
+                                    {fmtInt(t.status.deal_quantity)}
+                                </td>
+                                <td className={styles.td}>
+                                    <span
+                                        className={
+                                            styles.statusChip[statusKind(st)]
+                                        }
+                                    >
+                                        {st}
+                                    </span>
+                                </td>
+                                <td className={styles.td}>
+                                    {fmtOrderTime(t.status.order_ts)}
+                                </td>
+                                <td
+                                    className={styles.td}
+                                    style={{
+                                        maxWidth: '16rem',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                    }}
+                                >
+                                    {t.status.msg || '—'}
+                                </td>
+                                <td className={styles.td}>
+                                    {ACTIVE_STATUSES.has(st) && (
+                                        <>
+                                            <QtyEditor
+                                                trade={t}
+                                                onChanged={onChanged}
+                                            />{' '}
+                                            <button
+                                                className={styles.cancelBtn}
+                                                disabled={
+                                                    cancelling === t.order.id
+                                                }
+                                                onClick={() =>
+                                                    doCancel(t.order.id)
+                                                }
+                                            >
+                                                {cancelling === t.order.id
+                                                    ? '…'
+                                                    : 'CANCEL'}
+                                            </button>
+                                        </>
+                                    )}
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </>
     );
 }
 

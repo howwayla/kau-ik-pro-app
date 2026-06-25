@@ -57,6 +57,9 @@ export class EsunTradingProvider implements TradingProvider {
     private mdMod: { EsunMarketdata: new (o: unknown) => EsunMarketdataClient } | null =
         null;
     private md: EsunMarketdataClient | null = null;
+    private mdLogin: Promise<EsunMarketdataClient> | null = null;
+    private mdLoginDay: string | null = null; // 'YYYY-MM-DD'（台北）最後一次 md.login() 的日期
+    private mdRetryAfter = 0; // epoch ms；登入失敗退避視窗，在此之前不再嘗試 login
     private esunConfig!: EsunConfig;
     private eventCbs: ((ev: OrderEventData) => void)[] = [];
     private refs = new Map<string, { ordNo: string; trade: Trade }>();
@@ -142,29 +145,70 @@ export class EsunTradingProvider implements TradingProvider {
         }
     }
 
+    /** 台北日期字串（YYYY-MM-DD），用來判斷是否換日。 */
+    private esunDay(): string {
+        return new Date().toLocaleDateString('en-CA', {
+            timeZone: 'Asia/Taipei',
+        });
+    }
+
     /**
-     * 玉山自帶行情（@esun/marketdata，與富果同形狀）。clients 需先
-     * login() 取得 sdkToken — makeWs 重新 login 換新 token。
+     * 玉山帳號登入有每日上限（AGR0004：Login Daily Rate Limit 300）。
+     * sdkToken 當天有效，所以每日只 login() 一次並重用該 md client；隔日
+     * （或尚未登入）才重新 login()。並發的首次呼叫共用同一個登入 promise。
+     * 登入「失敗」時設退避視窗（mdRetryAfter）：視窗內 ensureMarketdata
+     * 直接拒絕、不再打 login —— 否則斷線重連會反覆重試登入，把已超額的
+     * AGR0004 持續打爆。
+     */
+    private ensureMarketdata(): Promise<EsunMarketdataClient> {
+        const today = this.esunDay();
+        if (this.md && this.mdLoginDay === today) return Promise.resolve(this.md);
+        if (Date.now() < this.mdRetryAfter) {
+            return Promise.reject(
+                new Error('玉山行情登入退避中（上次登入失敗），暫不重試'),
+            );
+        }
+        if (!this.mdLogin) {
+            this.mdLogin = (async () => {
+                const md = new this.mdMod!.EsunMarketdata({
+                    config: this.esunConfig,
+                });
+                try {
+                    await md.login();
+                } catch (err) {
+                    // AGR0004 是「每日上限」→ 退避 1 小時（額度重置前別再撞）；
+                    // 其他（網路等暫時性）→ 退避 30 秒快速恢復。
+                    const msg = String(
+                        (err as { message?: unknown })?.message ?? err,
+                    );
+                    const rateLimited = msg.includes('AGR0004');
+                    this.mdRetryAfter =
+                        Date.now() + (rateLimited ? 60 * 60_000 : 30_000);
+                    throw err;
+                }
+                this.md = md;
+                this.mdLoginDay = today;
+                this.mdRetryAfter = 0; // 成功 → 清退避
+                return md;
+            })().finally(() => {
+                this.mdLogin = null;
+            });
+        }
+        return this.mdLogin;
+    }
+
+    /**
+     * 玉山自帶行情（@esun/marketdata，與富果同形狀）。restClient /
+     * websocketClient 是 getter，每次取用都回「帶當天 sdkToken 的新
+     * factory」，所以斷線重連能拿到全新 client，而不必重新 login() —
+     * 重連只換 client、不換登入（隔日才會重登）。
      * 行情上限：盤中 600 req/min。
      */
     marketdataSource(): MarketClientSource | null {
         if (!this.mdMod) return null;
-        const make = async (): Promise<EsunMarketdataClient> => {
-            const md = new this.mdMod!.EsunMarketdata({
-                config: this.esunConfig,
-            });
-            await md.login();
-            return md;
-        };
         return {
-            makeRest: async () => {
-                if (!this.md) this.md = await make();
-                return this.md.restClient;
-            },
-            makeWs: async () => {
-                this.md = await make(); // fresh token for (re)connects
-                return this.md.websocketClient;
-            },
+            makeRest: async () => (await this.ensureMarketdata()).restClient,
+            makeWs: async () => (await this.ensureMarketdata()).websocketClient,
         };
     }
 

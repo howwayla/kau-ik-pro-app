@@ -91,6 +91,16 @@ export interface Snapshot {
     yesterday_volume: number;
 }
 
+/** futopt 盤別：日盤 / 夜盤(盤後) / 全(日+夜連續)。股票/指數忽略 */
+export type MarketSession = 'day' | 'afterhours' | 'all';
+
+/** 代碼/名稱搜尋結果一筆 */
+export interface SymbolHit {
+    code: string;
+    name: string;
+    type: SecurityType;
+}
+
 export interface KBars {
     datetime: string[]; // "YYYY-MM-DD HH:mm:ss" Taiwan wall clock
     Open: number[];
@@ -110,6 +120,14 @@ export interface HistoryTicks {
     ask_price: number[];
     ask_volume: number[];
     tick_type: number[];
+}
+
+/** 分價量表一列（官方 intraday/volumes；期貨無內外盤欄位 → at_* 為 0） */
+export interface VolumeLevel {
+    price: number;
+    volume: number;
+    at_bid: number; // 內盤（成交在買方掛單價）
+    at_ask: number; // 外盤（成交在賣方掛單價）
 }
 
 export interface ScannerItem {

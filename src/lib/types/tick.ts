@@ -18,3 +18,11 @@ export interface HistoryTicks {
     ask_volume: number[];
     tick_type: number[];
 }
+
+/** 分價量表一列（官方 intraday/volumes；期貨無內外盤欄位 → at_* 為 0） */
+export interface VolumeLevel {
+    price: number;
+    volume: number;
+    at_bid: number;
+    at_ask: number;
+}

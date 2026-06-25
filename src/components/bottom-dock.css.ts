@@ -157,6 +157,22 @@ export const statusChip = styleVariants({
     ],
 });
 
+export const orderBar = style({
+    display: 'flex',
+    alignItems: 'center',
+    gap: vars.space.sm,
+    padding: `4px ${vars.space.md}`,
+    borderBottom: `1px solid ${vars.color.border}`,
+    flexShrink: 0,
+});
+
+export const orderBarInfo = style({
+    fontFamily: vars.font.mono,
+    fontSize: '0.68rem',
+    color: vars.color.mutedForeground,
+    marginRight: 'auto',
+});
+
 export const cancelBtn = style({
     fontFamily: vars.font.display,
     fontSize: '0.64rem',

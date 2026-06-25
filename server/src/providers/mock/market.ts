@@ -5,6 +5,8 @@ import type {
     ContractInfo,
     CreditEnquire,
     HistoryTicks,
+    SymbolHit,
+    MarketSession,
     KBars,
     OptContract,
     ScannerItem,
@@ -80,7 +82,12 @@ export class MockMarketDataProvider implements MarketDataProvider {
         return out;
     }
 
-    async kbars(key: ContractKey, start: string, end: string): Promise<KBars> {
+    async kbars(
+        key: ContractKey,
+        start: string,
+        end: string,
+        _session?: MarketSession, // mock 無夜盤資料，忽略
+    ): Promise<KBars> {
         return this.engine.kbars(key.code, start, end);
     }
 
@@ -90,6 +97,16 @@ export class MockMarketDataProvider implements MarketDataProvider {
         lastCount?: number,
     ): Promise<HistoryTicks> {
         return this.engine.ticks(key.code, date, lastCount);
+    }
+
+    async volumes(): Promise<never[]> {
+        return []; // mock 無官方分價量 — 前端 fallback 用逐筆累計
+    }
+
+    async searchSymbols(query: string): Promise<SymbolHit[]> {
+        return this.engine
+            .searchSymbols(query)
+            .map((s) => ({ ...s, type: 'STK' as const }));
     }
 
     async scanner(
