@@ -12,10 +12,12 @@
         "desktop:build": "node scripts/build-desktop.mjs",
         "desktop:dev": "node scripts/build-desktop.mjs --dev",
         "desktop:doctor": "node scripts/build-desktop.mjs --doctor",
-        "test": "node --test scripts/desktop-targets.test.mjs scripts/preflight.test.mjs"
+        "test": "node --test scripts/desktop-targets.test.mjs scripts/preflight.test.mjs scripts/build-desktop-retry.test.mjs && pnpm exec tsx --test scripts/broker-secret-payload.test.ts scripts/broker-secret-store.test.ts scripts/broker-setup-fields.test.ts scripts/broker-setup-flow.test.ts scripts/broker-picker.test.ts scripts/broker-certificate-file.test.ts scripts/esun-config-import.test.ts scripts/broker-setup-wizard-render.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/data-dir.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/broker-credential-parts.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/desktop-auth.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/config-migration.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/provider-log-redaction.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/runtime-config.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/routes/config-metadata.test.ts && pnpm --filter kau-ik-pro-server exec tsx src/sse/wire-market.test.ts && pnpm test:ui",
+        "test:ui": "node scripts/run-ui-tests.mjs"
     },
     "dependencies": {
         "@tauri-apps/api": "^2.11.0",
+        "@tauri-apps/plugin-dialog": "^2.7.1",
         "@tauri-apps/plugin-notification": "^2.3.3",
         "@tauri-apps/plugin-process": "^2.3.1",
         "@tauri-apps/plugin-shell": "^2.3.5",
@@ -34,6 +36,7 @@
         "@vanilla-extract/vite-plugin": "^5.2.2",
         "@vitejs/plugin-react": "^6.0.1",
         "concurrently": "^9.1.0",
+        "tsx": "4.22.4",
         "typescript": "~5.9.3",
         "vite": "^8.0.1"
     }

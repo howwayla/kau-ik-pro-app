@@ -8,6 +8,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { AppContext } from './context.ts';
 import { registerConfigRoutes } from './routes/config.ts';
 import { registerDataRoutes } from './routes/data.ts';
+import { registerDesktopRoutes } from './routes/desktop.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerOrderRoutes } from './routes/orders.ts';
 import { registerPortfolioRoutes } from './routes/portfolio.ts';
@@ -36,7 +37,10 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     // CORS for web dev without the vite proxy (and Tauri webviews later)
     app.addHook('onSend', async (_req, reply) => {
         reply.header('Access-Control-Allow-Origin', '*');
-        reply.header('Access-Control-Allow-Headers', 'Content-Type');
+        reply.header(
+            'Access-Control-Allow-Headers',
+            'Content-Type, X-Kauik-Desktop-Auth',
+        );
         reply.header(
             'Access-Control-Allow-Methods',
             'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -45,6 +49,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     app.options('/*', async (_req, reply) => reply.code(204).send());
 
     registerHealthRoutes(app, ctx);
+    registerDesktopRoutes(app);
     registerConfigRoutes(app, ctx);
     registerDataRoutes(app, ctx);
     registerStreamRoutes(app, ctx);

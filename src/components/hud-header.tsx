@@ -18,9 +18,21 @@ import {
     type TradeConfig,
     type TradeProviderName,
 } from '../lib/backend';
+import type { BrokerName } from '../lib/broker-secret-payload';
+import {
+    loginBrokerWithSavedSecrets,
+    statusBrokerSecrets,
+} from '../lib/broker-secret-store';
+import {
+    effectiveBrokerAvailability,
+    resolveTradePickerAction,
+    savedBrokerNames,
+} from '../lib/broker-picker';
 import { setCapabilities } from '../lib/capabilities';
 import { useTriggerStatus } from '../lib/triggers';
 import { SENSITIVE, setPrivacy, usePrivacy } from '../lib/privacy';
+import { isTauri } from '../lib/runtime';
+import { runSecureStorageSpike } from '../lib/secure-storage-spike';
 import { setSoundEnabled, soundEnabled } from '../lib/sounds';
 import {
     setThemeSettings,
@@ -31,6 +43,7 @@ import {
 } from '../lib/theme-store';
 import { fmtMoney } from '../lib/utils/format';
 import type { BlockType } from '../lib/workspace';
+import { BrokerSetupWizard } from './broker-setup-wizard';
 import { MarketBar } from './market-bar';
 import * as panel from './panel.css';
 import * as styles from './hud-header.css';
@@ -329,248 +342,304 @@ const BROKER_LABEL: Record<TradeProviderName, string> = {
 
 function BrokerMenu() {
     const [config, setConfig] = useState<TradeConfig | null>(null);
-    // broker awaiting credentials input (no env/saved creds on the server)
-    const [pending, setPending] = useState<'fubon' | 'nova' | 'esun' | null>(
-        null,
-    );
-    const [form, setForm] = useState({
-        idNo: '',
-        password: '',
-        apiKey: '',
-        apiSecret: '',
-        certPath: '',
-        certPass: '',
-    });
+    const [wizardBroker, setWizardBroker] = useState<BrokerName | null>(null);
+    const [wizardError, setWizardError] = useState('');
+    const [wizardOpen, setWizardOpen] = useState(false);
     const [busy, setBusy] = useState<TradeProviderName | null>(null);
     const [error, setError] = useState('');
+    const [secretPresence, setSecretPresence] = useState<
+        Partial<Record<BrokerName, boolean>>
+    >({});
+    const [storageCheck, setStorageCheck] = useState<{
+        busy: boolean;
+        ok: boolean | null;
+        message: string;
+    }>({ busy: false, ok: null, message: '' });
 
     useEffect(() => {
         fetchTradeConfig()
             .then((cfg) => {
                 setConfig(cfg);
+                if (isTauri) {
+                    void Promise.all(
+                        (['fubon', 'nova', 'esun'] as const).map(
+                            async (broker) => {
+                                if (!cfg.creds[broker].saved) {
+                                    return [broker, false] as const;
+                                }
+                                const status = await statusBrokerSecrets(
+                                    broker,
+                                ).catch(() => ({
+                                    ok: false,
+                                    present: false,
+                                    error: 'status failed',
+                                }));
+                                return [broker, status.present] as const;
+                            },
+                        ),
+                    ).then((entries) =>
+                        setSecretPresence(Object.fromEntries(entries)),
+                    );
+                }
                 // scope client-side stop/take triggers to this broker
             })
             .catch(() => setConfig(null));
     }, []);
 
-    const doSwitch = async (
-        provider: TradeProviderName,
-        creds?: typeof form,
-    ) => {
+    const openWizard = (broker: BrokerName | null, message = '') => {
+        setWizardBroker(broker);
+        setWizardError(message);
+        setWizardOpen(true);
+    };
+
+    const finishSwitch = (warning?: string | null) => {
+        if (warning) {
+            setError(`⚠ ${warning}（5 秒後重新整理）`);
+            setTimeout(() => window.location.reload(), 5000);
+            return;
+        }
+        // contract caches / charts hold old-provider data — full reload
+        window.location.reload();
+    };
+
+    const doSwitch = async (provider: TradeProviderName) => {
         if (busy) return;
         setBusy(provider);
         setError('');
         try {
-            const res = await setTradeSource({
-                provider,
-                ...(creds
-                    ? {
-                          id_no: creds.idNo,
-                          password: creds.password,
-                          api_key: creds.apiKey,
-                          api_secret: creds.apiSecret,
-                          cert_path: creds.certPath,
-                          cert_pass: creds.certPass,
-                      }
-                    : {}),
-            });
-            if (res.warning) {
-                setError(`⚠ ${res.warning}（5 秒後重新整理）`);
-                setTimeout(() => window.location.reload(), 5000);
-                return;
-            }
-            // contract caches / charts hold old-provider data — full reload
-            window.location.reload();
+            const res = await setTradeSource({ provider });
+            finishSwitch(res.warning);
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
             setBusy(null);
         }
     };
 
-    const pick = (provider: TradeProviderName) => {
-        if (provider === current || busy) return;
-        if (provider === 'mock') {
-            void doSwitch('mock');
-            return;
+    const doSavedSwitch = async (
+        provider: BrokerName,
+        metadata: NonNullable<TradeConfig['metadata'][BrokerName]>,
+        close?: () => void,
+    ) => {
+        if (busy) return;
+        setBusy(provider);
+        setError('');
+        try {
+            const res = await loginBrokerWithSavedSecrets(provider, metadata);
+            finishSwitch(res.warning);
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            close?.();
+            openWizard(
+                provider,
+                `已儲存的登入資訊無法使用，請重新設定：${message}`,
+            );
+            setError(message);
+            setBusy(null);
         }
-        const avail = config?.creds?.[provider];
-        if (avail?.saved || avail?.env) {
+    };
+
+    const pick = (provider: TradeProviderName, close?: () => void) => {
+        const action = resolveTradePickerAction({
+            provider,
+            current,
+            busy: Boolean(busy),
+            availability:
+                provider === 'mock'
+                    ? undefined
+                    : effectiveBrokerAvailability({
+                          availability: config?.creds?.[provider],
+                          canUseSecureStorage: isTauri,
+                          secretPresent: secretPresence[provider],
+                      }),
+            metadata:
+                provider === 'mock' ? null : (config?.metadata?.[provider] ?? null),
+            canUseSecureStorage: isTauri,
+        });
+
+        if (action.kind === 'idle') return;
+        if (action.kind === 'switch') {
             void doSwitch(provider);
-        } else {
-            setPending(provider);
+        } else if (action.kind === 'saved-switch' && provider !== 'mock') {
+            void doSavedSwitch(provider, action.metadata, close);
+        } else if (provider !== 'mock') {
+            close?.();
+            openWizard(provider);
             setError('');
         }
     };
 
+    const checkSecureStorage = async () => {
+        if (storageCheck.busy) return;
+        setStorageCheck({ busy: true, ok: null, message: '' });
+        try {
+            const res = await runSecureStorageSpike();
+            setStorageCheck({
+                busy: false,
+                ok: res.ok,
+                message: res.message,
+            });
+        } catch (e) {
+            setStorageCheck({
+                busy: false,
+                ok: false,
+                message: e instanceof Error ? e.message : String(e),
+            });
+        }
+    };
+
     const current = config?.provider ?? 'mock';
-    const field = (key: keyof typeof form, value: string) =>
-        setForm((f) => ({ ...f, [key]: value }));
-    const formReady =
-        form.idNo.trim() &&
-        form.certPath.trim() &&
-        (form.password || form.apiKey.trim()) &&
-        (pending !== 'esun' ||
-            (form.password && form.apiKey.trim() && form.apiSecret.trim()));
+    const effectiveCreds = config
+        ? {
+              fubon: effectiveBrokerAvailability({
+                  availability: config.creds.fubon,
+                  canUseSecureStorage: isTauri,
+                  secretPresent: secretPresence.fubon,
+              }) ?? { env: false, saved: false },
+              nova: effectiveBrokerAvailability({
+                  availability: config.creds.nova,
+                  canUseSecureStorage: isTauri,
+                  secretPresent: secretPresence.nova,
+              }) ?? { env: false, saved: false },
+              esun: effectiveBrokerAvailability({
+                  availability: config.creds.esun,
+                  canUseSecureStorage: isTauri,
+                  secretPresent: secretPresence.esun,
+              }) ?? { env: false, saved: false },
+          }
+        : undefined;
+    const reconnectableBrokers = savedBrokerNames(effectiveCreds);
 
     return (
-        <Menu label={`券商·${BROKER_LABEL[current]}`}>
-            {() => (
-                <>
-                    <span className={styles.settingLabel}>
-                        券商 Trading Broker
-                    </span>
-                    <span className={styles.emptyHint}>
-                        目前：
-                        {current === 'mock'
-                            ? '模擬撮合（紙上交易）'
-                            : `${BROKER_LABEL[current]}證券 — ⚠ 真實下單`}
-                    </span>
-                    <div className={styles.settingGroup}>
-                        {(['mock', 'fubon', 'nova', 'esun'] as const).map(
-                            (p) => (
-                                <button
-                                    key={p}
-                                    className={
-                                        styles.opt[
-                                            current === p ? 'on' : 'off'
-                                        ]
-                                    }
-                                    disabled={Boolean(busy)}
-                                    onClick={() => pick(p)}
-                                >
-                                    {busy === p ? '登入中…' : BROKER_LABEL[p]}
-                                </button>
-                            ),
-                        )}
-                    </div>
-                    {/* 每家券商：即使已有存檔憑證，也可改用其他帳號登入 */}
-                    {(['fubon', 'nova', 'esun'] as const).map((p) => {
-                        const avail = config?.creds?.[p];
-                        if (!avail?.saved && !avail?.env) return null;
-                        if (pending === p) return null;
-                        return (
-                            <button
-                                key={`relogin-${p}`}
-                                className={styles.menuItem}
-                                onClick={() => {
-                                    setPending(p);
-                                    setForm({
-                                        idNo: '',
-                                        password: '',
-                                        apiKey: '',
-                                        apiSecret: '',
-                                        certPath: '',
-                                        certPass: '',
-                                    });
-                                    setError('');
-                                }}
-                            >
-                                🔑 用其他{BROKER_LABEL[p]}帳號登入
-                            </button>
-                        );
-                    })}
-                    {pending && (
-                        <>
-                            <span className={styles.settingLabel}>
-                                {BROKER_LABEL[pending]}憑證（僅存於本機
-                                server/data/config.json）
-                            </span>
-                            <input
-                                className={styles.saveInput}
-                                placeholder={
-                                    pending === 'esun'
-                                        ? '證券帳號（884 開頭）'
-                                        : '身分證字號'
-                                }
-                                value={form.idNo}
-                                onChange={(e) => field('idNo', e.target.value)}
-                            />
-                            <input
-                                className={styles.saveInput}
-                                type='password'
-                                placeholder={
-                                    pending === 'fubon'
-                                        ? '密碼（或填下方 API Key）'
-                                        : '密碼'
-                                }
-                                value={form.password}
-                                onChange={(e) =>
-                                    field('password', e.target.value)
-                                }
-                            />
-                            {pending === 'fubon' && (
-                                <input
-                                    className={styles.saveInput}
-                                    type='password'
-                                    placeholder='API Key（可代替密碼）'
-                                    value={form.apiKey}
-                                    onChange={(e) =>
-                                        field('apiKey', e.target.value)
-                                    }
-                                />
-                            )}
-                            {pending === 'esun' && (
-                                <>
-                                    <input
-                                        className={styles.saveInput}
-                                        type='password'
-                                        placeholder='API Key'
-                                        value={form.apiKey}
-                                        onChange={(e) =>
-                                            field('apiKey', e.target.value)
-                                        }
-                                    />
-                                    <input
-                                        className={styles.saveInput}
-                                        type='password'
-                                        placeholder='API Secret'
-                                        value={form.apiSecret}
-                                        onChange={(e) =>
-                                            field('apiSecret', e.target.value)
-                                        }
-                                    />
-                                </>
-                            )}
-                            <input
-                                className={styles.saveInput}
-                                placeholder='憑證路徑（.pfx / .p12 絕對路徑）'
-                                value={form.certPath}
-                                onChange={(e) =>
-                                    field('certPath', e.target.value)
-                                }
-                            />
-                            <input
-                                className={styles.saveInput}
-                                type='password'
-                                placeholder='憑證密碼'
-                                value={form.certPass}
-                                onChange={(e) =>
-                                    field('certPass', e.target.value)
-                                }
-                            />
-                            <button
-                                className={styles.opt.off}
-                                disabled={Boolean(busy) || !formReady}
-                                onClick={() => void doSwitch(pending, form)}
-                            >
-                                {busy ? '登入中…（約 10 秒）' : '✓ 登入並切換'}
-                            </button>
-                        </>
-                    )}
-                    {error && (
-                        <span
-                            className={`${styles.emptyHint} ${panel.dirText.up}`}
-                        >
-                            ✕ {error}
+        <>
+            <Menu label={`券商·${BROKER_LABEL[current]}`}>
+                {(close) => (
+                    <>
+                        <span className={styles.settingLabel}>
+                            券商 Trading Broker
                         </span>
-                    )}
-                    <span className={styles.emptyHint}>
-                        切換到券商後：交易走券商 API、行情直接用券商行情
-                        （免富果 Key）。每一筆委託都是真實交易。
-                    </span>
-                </>
-            )}
-        </Menu>
+                        <span className={styles.emptyHint}>
+                            目前：
+                            {current === 'mock'
+                                ? '模擬撮合（紙上交易）'
+                                : `${BROKER_LABEL[current]}證券 — ⚠ 真實下單`}
+                        </span>
+                        {current === 'mock' && reconnectableBrokers.length > 0 && (
+                            <span className={styles.emptyHint}>
+                                已儲存：
+                                {reconnectableBrokers
+                                    .map((broker) => BROKER_LABEL[broker])
+                                    .join('、')}
+                                ；點券商可手動重連，重連前仍是模擬環境。
+                            </span>
+                        )}
+                        <div className={styles.settingGroup}>
+                            {(['mock', 'fubon', 'nova', 'esun'] as const).map(
+                                (p) => (
+                                    <button
+                                        key={p}
+                                        className={
+                                            styles.opt[
+                                                current === p ? 'on' : 'off'
+                                            ]
+                                        }
+                                        disabled={Boolean(busy)}
+                                        onClick={() => pick(p, close)}
+                                    >
+                                        {busy === p
+                                            ? '登入中…'
+                                            : BROKER_LABEL[p]}
+                                    </button>
+                                ),
+                            )}
+                        </div>
+                        <button
+                            className={styles.menuItem}
+                            disabled={Boolean(busy)}
+                            onClick={() => {
+                                close();
+                                openWizard(null);
+                            }}
+                        >
+                            設定券商登入
+                        </button>
+                        {/* 每家券商：即使已有存檔憑證，也可改用其他帳號登入 */}
+                        {(['fubon', 'nova', 'esun'] as const).map((p) => {
+                            const avail = config?.creds?.[p];
+                            if (!avail?.saved && !avail?.env) return null;
+                            return (
+                                <button
+                                    key={`relogin-${p}`}
+                                    className={styles.menuItem}
+                                    disabled={Boolean(busy)}
+                                    onClick={() => {
+                                        close();
+                                        openWizard(p);
+                                        setError('');
+                                    }}
+                                >
+                                    🔑 用其他{BROKER_LABEL[p]}帳號登入
+                                </button>
+                            );
+                        })}
+                        {error && (
+                            <span
+                                className={`${styles.emptyHint} ${panel.dirText.up}`}
+                            >
+                                ✕ {error}
+                            </span>
+                        )}
+                        <span className={styles.emptyHint}>
+                            切換到券商後：交易走券商 API、行情直接用券商行情
+                            （免富果 Key）。每一筆委託都是真實交易。
+                        </span>
+                        <span className={styles.settingLabel}>
+                            安全儲存診斷
+                        </span>
+                        <button
+                            className={styles.opt.off}
+                            disabled={storageCheck.busy}
+                            onClick={checkSecureStorage}
+                        >
+                            {storageCheck.busy
+                                ? '測試中…'
+                                : '測試系統安全儲存'}
+                        </button>
+                        {storageCheck.message && (
+                            <span
+                                className={`${styles.emptyHint} ${
+                                    storageCheck.ok
+                                        ? panel.dirText.down
+                                        : panel.dirText.up
+                                }`}
+                            >
+                                {storageCheck.message}
+                            </span>
+                        )}
+                    </>
+                )}
+            </Menu>
+            <BrokerSetupWizard
+                open={wizardOpen}
+                initialBroker={wizardBroker}
+                initialError={wizardError}
+                currentBroker={current}
+                configured={{
+                    fubon: Boolean(
+                        config?.creds?.fubon?.saved ||
+                            config?.creds?.fubon?.env,
+                    ),
+                    nova: Boolean(
+                        config?.creds?.nova?.saved ||
+                            config?.creds?.nova?.env,
+                    ),
+                    esun: Boolean(
+                        config?.creds?.esun?.saved ||
+                            config?.creds?.esun?.env,
+                    ),
+                }}
+                onClose={() => setWizardOpen(false)}
+            />
+        </>
     );
 }
 

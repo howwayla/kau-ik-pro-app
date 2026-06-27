@@ -9,6 +9,7 @@ import type { ContractInfo, SecurityType } from '../lib/types/contract';
 import { fmtPct, fmtPrice, fmtSigned } from '../lib/utils/format';
 import { dateStrOffset, kbarsToCandles } from '../lib/utils/kbars';
 import * as panel from './panel.css';
+import { SymbolCell, type SymbolMarker } from './symbol-cell';
 import * as styles from './watchlist.css';
 
 /** 當日 1 分 K 收盤價迷你走勢線（最後一點用即時價補） */
@@ -127,6 +128,10 @@ function WatchRow({
     // re-key by flashSeq so the flash animation replays only on real deals
     const flashDir =
         !quote?.flashSeq ? 'none' : quote.lastDir === -1 ? 'down' : 'up';
+    const markers: SymbolMarker[] = [
+        ...(regFlag ? [regFlag] : []),
+        ...(tick?.simtrade ? ['trial' as const] : []),
+    ];
 
     return (
         <div
@@ -136,24 +141,12 @@ function WatchRow({
             } ${styles.flash[flashDir]}`}
             onClick={() => onSelect(item.contract)}
         >
-            <span className={styles.code}>
-                {item.contract.code}
-                {regFlag === 'punish' && (
-                    <span className={styles.rowBadge.punish} title='處置股'>
-                        處
-                    </span>
-                )}
-                {regFlag === 'attention' && (
-                    <span className={styles.rowBadge.attention} title='注意股'>
-                        注
-                    </span>
-                )}
-                {tick?.simtrade && (
-                    <span className={styles.rowBadge.trial} title='試算撮合'>
-                        試
-                    </span>
-                )}
-            </span>
+            <SymbolCell
+                code={item.contract.code}
+                name={item.contract.name}
+                markers={markers}
+                className={styles.symbolCell}
+            />
             {showSpark && <Sparkline contract={item.contract} last={close} />}
             <span
                 className={`${styles.price} ${
@@ -171,7 +164,6 @@ function WatchRow({
             >
                 {fmtPrice(close)}
             </span>
-            <span className={styles.name}>{item.contract.name}</span>
             <span className={`${styles.change} ${panel.dirText[dir]}`}>
                 {fmtSigned(chg)} {fmtPct(pct)}
             </span>

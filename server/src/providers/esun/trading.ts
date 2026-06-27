@@ -31,6 +31,7 @@ import type {
     Trade,
 } from '../../types/dto.ts';
 import type { Config } from '../../config.ts';
+import { brokerLoginSuccessMessage } from '../logging.ts';
 import type { ContractKey, MarketClientSource } from '../market-data.ts';
 import {
     FuturesNotSupportedError,
@@ -131,7 +132,7 @@ export class EsunTradingProvider implements TradingProvider {
         this.sdk.streamer.on('trade', (msg) => this.emitFill(msg));
         this.sdk.streamer.on('error', () => undefined);
         this.sdk.streamer.connect();
-        console.log(`esun: 登入成功 ${idNo}`);
+        console.log(brokerLoginSuccessMessage('esun', ['證券']));
     }
 
     dispose(): void {
