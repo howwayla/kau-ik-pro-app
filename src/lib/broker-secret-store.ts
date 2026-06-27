@@ -5,6 +5,8 @@ import {
 } from './broker-secret-payload';
 import { isTauri } from './runtime';
 
+const SECURE_STORAGE_DESKTOP_ONLY = '系統安全儲存只能在桌面 App 使用';
+
 export interface BrokerSecretCommandResult {
     ok: boolean;
     present: boolean;
@@ -15,7 +17,8 @@ export type BrokerSecretInvokeCommand =
     | 'broker_secret_save'
     | 'broker_secret_status'
     | 'broker_secret_delete'
-    | 'broker_secret_login';
+    | 'broker_secret_login'
+    | 'broker_fresh_login';
 
 export type BrokerSecretInvoker = <T>(
     command: BrokerSecretInvokeCommand,
@@ -108,6 +111,27 @@ export async function loginBrokerWithSavedSecretsWithInvoke(
     return result;
 }
 
+export async function freshLoginBrokerWithInvoke(
+    invoke: BrokerSecretInvoker,
+    broker: BrokerName,
+    form: BrokerSetupForm,
+): Promise<BrokerSecretLoginResult> {
+    const result = await invoke<BrokerSecretLoginResult>('broker_fresh_login', {
+        broker,
+        metadata: {
+            certPath: form.certPath,
+            apiUrl: form.apiUrl ?? '',
+        },
+        secrets: brokerSecretsFromSetupForm(form),
+    });
+    if (!result.ok) {
+        throw new Error(
+            `登入券商失敗：${result.error ?? '系統安全儲存無法使用'}`,
+        );
+    }
+    return result;
+}
+
 export async function saveBrokerSecrets(
     broker: BrokerName,
     form: BrokerSetupForm,
@@ -120,12 +144,20 @@ export async function loginBrokerWithSavedSecrets(
     broker: BrokerName,
     metadata: BrokerSavedMetadata,
 ): Promise<BrokerSecretLoginResult> {
-    if (!isTauri) throw new Error('系統安全儲存只能在桌面 App 使用');
+    if (!isTauri) throw new Error(SECURE_STORAGE_DESKTOP_ONLY);
     return loginBrokerWithSavedSecretsWithInvoke(
         invokeBrokerSecret,
         broker,
         metadata,
     );
+}
+
+export async function freshLoginBroker(
+    broker: BrokerName,
+    form: BrokerSetupForm,
+): Promise<BrokerSecretLoginResult> {
+    if (!isTauri) throw new Error(SECURE_STORAGE_DESKTOP_ONLY);
+    return freshLoginBrokerWithInvoke(invokeBrokerSecret, broker, form);
 }
 
 export async function statusBrokerSecrets(

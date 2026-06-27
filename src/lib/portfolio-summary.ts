@@ -17,6 +17,7 @@ export interface StockPositionSummary {
     todayUnrealized: number;
     todayBasisValue: number;
     missingPriceCount: number;
+    todayBasisMissingCount: number;
 }
 
 export function summarizeStockPositions(
@@ -45,6 +46,10 @@ export function summarizeStockPositions(
                     position.quantity *
                     1000 *
                     directionSign;
+            } else {
+                // Priced, but no usable reference — it is in totalMarketValue yet
+                // excluded from the today-return basis. Track it so the UI can say so.
+                summary.todayBasisMissingCount += 1;
             }
             return summary;
         },
@@ -55,10 +60,15 @@ export function summarizeStockPositions(
             todayUnrealized: 0,
             todayBasisValue: 0,
             missingPriceCount: 0,
+            todayBasisMissingCount: 0,
         },
     );
 }
 
 export function formatMissingPriceCountHint(count: number): string {
     return count > 0 ? `有 ${count} 筆部位因缺少價格未納入` : '';
+}
+
+export function formatMissingReferenceCountHint(count: number): string {
+    return count > 0 ? `有 ${count} 筆部位因缺少參考價未計入今日報酬率` : '';
 }

@@ -198,5 +198,26 @@ await check('fills only missing metadata and does not overwrite canonical settin
     });
 });
 
+await check('scans prior product-name and bundle-id legacy dirs (Nova Pro / Shioaji Pro)', () => {
+    const root = tempRoot();
+    const target = join(root, 'io.github.howwayla.kauikpro', 'config.json');
+    const files = legacyRuntimeConfigFiles(target);
+    for (const dir of [
+        'Nova Pro',
+        'io.github.howwayla.novapro',
+        'Shioaji Pro',
+        'com.sinotrade.shioaji-pro',
+    ]) {
+        assert.ok(
+            files.includes(join(root, dir, 'config.json')),
+            `${dir}/config.json not scanned`,
+        );
+        assert.ok(
+            files.includes(join(root, dir, 'server', 'config.json')),
+            `${dir}/server/config.json not scanned`,
+        );
+    }
+});
+
 console.log(`\n${failures === 0 ? 'ALL GREEN' : failures + ' FAILING'}`);
 process.exit(failures === 0 ? 0 : 1);

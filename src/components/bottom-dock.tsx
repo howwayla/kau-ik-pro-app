@@ -8,6 +8,7 @@ import { apiPost } from '../lib/api';
 import { resolveDisplayPrice } from '../lib/display-price';
 import {
     formatMissingPriceCountHint,
+    formatMissingReferenceCountHint,
     summarizeStockPositions,
 } from '../lib/portfolio-summary';
 import { calculatePositionMetrics } from '../lib/position-metrics';
@@ -994,10 +995,16 @@ function AccountView({
         todayUnrealized,
         todayBasisValue,
         missingPriceCount,
+        todayBasisMissingCount,
     } = stockSummary;
     const missingPriceHint = formatMissingPriceCountHint(missingPriceCount);
+    const missingReferenceHint = formatMissingReferenceCountHint(
+        todayBasisMissingCount,
+    );
     const appendMissingPriceHint = (hint: string) =>
         missingPriceHint ? `${hint}；${missingPriceHint}` : hint;
+    const appendTodayBasisHints = (hint: string) =>
+        [hint, missingPriceHint, missingReferenceHint].filter(Boolean).join('；');
     const todayUnreal = todayUnrealized;
     const todayTotal = todayRealized + todayUnreal;
     const ydMkt = todayBasisValue; // 今日報酬率基準：有參考價部位的昨日市值
@@ -1029,7 +1036,7 @@ function AccountView({
                 label: '今日總損益（報酬率）',
                 value: withPct(todayTotal, ydMkt),
                 dir: dirOf(todayTotal),
-                hint: appendMissingPriceHint(
+                hint: appendTodayBasisHints(
                     '今日已實現 + 今日未實現變化；報酬率以昨日市值為基準',
                 ),
             },
@@ -1043,7 +1050,7 @@ function AccountView({
                 label: '今日未實現損益變化',
                 value: fmtSigned(todayUnreal, 0),
                 dir: dirOf(todayUnreal),
-                hint: appendMissingPriceHint(
+                hint: appendTodayBasisHints(
                     'Σ(現價 − 今日參考價) × 持股。以參考價為基準：除權息日已排除除息缺口，呈現市場真實漲跌（股息另計）；故與以昨收為基準的券商 app 在除權息日會有差異',
                 ),
             },

@@ -315,24 +315,24 @@ pub fn broker_secret_delete_result(broker: &str) -> BrokerSecretCommandResult {
     }
 }
 
-pub async fn broker_secret_login_result(
-    broker: String,
-    metadata: BrokerSecretMetadata,
-) -> BrokerSecretLoginResult {
-    if let Err(err) = broker_secret_account(&broker) {
-        return BrokerSecretLoginResult::error(err);
-    }
+fn broker_login_precheck(
+    broker: &str,
+    metadata: &BrokerSecretMetadata,
+) -> Result<(), String> {
+    broker_secret_account(broker)?;
     if metadata.cert_path.trim().is_empty() {
-        return BrokerSecretLoginResult::error("缺少憑證路徑");
+        return Err("缺少憑證路徑".to_string());
     }
-    let secrets = match broker_secret_load_result(&broker) {
-        Ok(Some(secrets)) => secrets,
-        Ok(None) => {
-            return BrokerSecretLoginResult::error("尚未在系統安全儲存中找到這家券商的登入資訊");
-        }
-        Err(err) => return BrokerSecretLoginResult::error(err),
-    };
-    let request = broker_secret_login_request(&broker, &metadata, &secrets);
+    Ok(())
+}
+
+// Shared tail for every broker login that carries secrets to the sidecar:
+// verify the local server's identity (so secrets are never sent to a port-squatter),
+// then POST with the per-launch desktop-auth header. Used by both the keychain-backed
+// reconnect path and the first-time setup path.
+async fn post_broker_secret_login(
+    request: BrokerSecretLoginRequest<'_>,
+) -> BrokerSecretLoginResult {
     let token = match desktop_auth_token() {
         Ok(token) => token,
         Err(err) => return BrokerSecretLoginResult::error(err),
@@ -371,6 +371,40 @@ pub async fn broker_secret_login_result(
         Ok(result) => BrokerSecretLoginResult::ok(result),
         Err(err) => BrokerSecretLoginResult::error(err.to_string()),
     }
+}
+
+pub async fn broker_secret_login_result(
+    broker: String,
+    metadata: BrokerSecretMetadata,
+) -> BrokerSecretLoginResult {
+    if let Err(err) = broker_login_precheck(&broker, &metadata) {
+        return BrokerSecretLoginResult::error(err);
+    }
+    let secrets = match broker_secret_load_result(&broker) {
+        Ok(Some(secrets)) => secrets,
+        Ok(None) => {
+            return BrokerSecretLoginResult::error("尚未在系統安全儲存中找到這家券商的登入資訊");
+        }
+        Err(err) => return BrokerSecretLoginResult::error(err),
+    };
+    let request = broker_secret_login_request(&broker, &metadata, &secrets);
+    post_broker_secret_login(request).await
+}
+
+// First-time setup login: the secrets come straight from the wizard form (not yet
+// in the keychain). Routing through here — instead of an unauthenticated webview
+// POST — keeps the identity handshake + desktop-auth header on the very first
+// credential submission, where the plaintext secrets are most sensitive.
+pub async fn broker_fresh_login_result(
+    broker: String,
+    metadata: BrokerSecretMetadata,
+    secrets: BrokerSecrets,
+) -> BrokerSecretLoginResult {
+    if let Err(err) = broker_login_precheck(&broker, &metadata) {
+        return BrokerSecretLoginResult::error(err);
+    }
+    let request = broker_secret_login_request(&broker, &metadata, &secrets);
+    post_broker_secret_login(request).await
 }
 
 pub fn secure_storage_spike_write_result() -> SecureStorageSpikeResult {
@@ -470,6 +504,15 @@ async fn broker_secret_login(
     broker_secret_login_result(broker, metadata).await
 }
 
+#[tauri::command]
+async fn broker_fresh_login(
+    broker: String,
+    metadata: BrokerSecretMetadata,
+    secrets: BrokerSecrets,
+) -> BrokerSecretLoginResult {
+    broker_fresh_login_result(broker, metadata, secrets).await
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
@@ -546,7 +589,8 @@ pub fn run() {
             broker_secret_save,
             broker_secret_status,
             broker_secret_delete,
-            broker_secret_login
+            broker_secret_login,
+            broker_fresh_login
         ])
         .setup(|app| {
             // ---- bundled Node server sidecar (auto-started; killed on exit) ----
@@ -693,5 +737,25 @@ mod tests {
     fn broker_secret_http_client_has_timeout() {
         assert!(broker_secret_http_client().is_ok());
         assert_eq!(BROKER_SECRET_HTTP_TIMEOUT_SECS, 15);
+    }
+
+    #[test]
+    fn broker_login_precheck_requires_known_broker_and_cert_path() {
+        let valid = BrokerSecretMetadata {
+            cert_path: "/private/certs/nova.p12".to_string(),
+            api_url: String::new(),
+        };
+        assert!(broker_login_precheck("nova", &valid).is_ok());
+
+        let missing_cert = BrokerSecretMetadata {
+            cert_path: "  ".to_string(),
+            api_url: String::new(),
+        };
+        assert_eq!(
+            broker_login_precheck("nova", &missing_cert).unwrap_err(),
+            "缺少憑證路徑"
+        );
+
+        assert!(broker_login_precheck("sinopac", &valid).is_err());
     }
 }

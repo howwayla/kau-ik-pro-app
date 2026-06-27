@@ -11,6 +11,13 @@ type BrokerKey = BrokerName;
 const LEGACY_CONFIG_DIRS = [
     'Kau-ik Pro',
     'io.github.howwayla.kauikpro',
+    // Prior product identities — Tauri keys the app-data dir on the bundle id,
+    // so plaintext brokerCreds left by earlier versions live under these names
+    // and must still be scrubbed after a rename (Nova Pro → Kau-ik Pro, #8).
+    'Nova Pro',
+    'io.github.howwayla.novapro',
+    'Shioaji Pro',
+    'com.sinotrade.shioaji-pro',
 ] as const;
 
 interface RuntimeConfigJson {

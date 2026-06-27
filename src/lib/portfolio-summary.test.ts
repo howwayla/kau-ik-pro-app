@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     formatMissingPriceCountHint,
+    formatMissingReferenceCountHint,
     summarizeStockPositions,
 } from './portfolio-summary';
 import { resolveDisplayPrice } from './display-price';
@@ -126,6 +127,60 @@ test('uses only positions with reference prices for today return basis', () => {
     assert.equal(summary.totalMarketValue, 630_000);
     assert.equal(summary.todayUnrealized, 20_000);
     assert.equal(summary.todayBasisValue, 490_000);
+});
+
+test('counts priced positions missing a reference for the today basis', () => {
+    const summary = summarizeStockPositions([
+        {
+            code: '2330',
+            direction: 'Buy',
+            quantity: 1,
+            averagePrice: 500,
+            pnl: 10_000,
+            reference: 490,
+            displayPrice: price(510, 'live'),
+        },
+        {
+            code: '9999',
+            direction: 'Buy',
+            quantity: 1,
+            averagePrice: 100,
+            pnl: 0,
+            reference: undefined,
+            displayPrice: price(120, 'live'),
+        },
+        {
+            code: '8888',
+            direction: 'Buy',
+            quantity: 1,
+            averagePrice: 50,
+            pnl: 0,
+            reference: 0,
+            displayPrice: price(60, 'live'),
+        },
+        {
+            code: '7777',
+            direction: 'Buy',
+            quantity: 1,
+            averagePrice: 80,
+            pnl: 0,
+            reference: 80,
+            displayPrice: price(undefined, 'missing'),
+        },
+    ]);
+
+    // 9999 (no reference) and 8888 (reference 0) are priced but excluded from the
+    // today basis; 7777 has no price at all so it counts as missingPriceCount only.
+    assert.equal(summary.todayBasisMissingCount, 2);
+    assert.equal(summary.missingPriceCount, 1);
+});
+
+test('formats the missing-reference hint', () => {
+    assert.equal(
+        formatMissingReferenceCountHint(2),
+        '有 2 筆部位因缺少參考價未計入今日報酬率',
+    );
+    assert.equal(formatMissingReferenceCountHint(0), '');
 });
 
 test('summarizes short stock positions with signed totals', () => {

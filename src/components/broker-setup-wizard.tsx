@@ -11,6 +11,7 @@ import {
 } from '../lib/broker-secret-payload';
 import {
     deleteBrokerSecrets,
+    freshLoginBroker,
     saveBrokerSecrets,
     statusBrokerSecrets,
 } from '../lib/broker-secret-store';
@@ -172,17 +173,23 @@ export function BrokerSetupWizard({
         let liveSwitchSucceeded = false;
 
         try {
-            const result = await setTradeSource({
-                provider: broker,
-                id_no: form.idNo,
-                password: form.password,
-                api_key: form.apiKey,
-                api_secret: form.apiSecret,
-                cert_path: form.certPath,
-                cert_pass: form.certPass,
-                api_url: form.apiUrl,
-                persist_metadata: isTauri ? false : undefined,
-            });
+            // Desktop: route the live login through the Tauri command so the first
+            // credential submission gets the same identity handshake + desktop-auth
+            // header as a saved-secret reconnect (the secrets never travel to an
+            // unauthenticated localhost listener). Web has no keychain/auth token,
+            // so it keeps persisting creds server-side via the config route.
+            const result = isTauri
+                ? await freshLoginBroker(broker, form)
+                : await setTradeSource({
+                      provider: broker,
+                      id_no: form.idNo,
+                      password: form.password,
+                      api_key: form.apiKey,
+                      api_secret: form.apiSecret,
+                      cert_path: form.certPath,
+                      cert_pass: form.certPass,
+                      api_url: form.apiUrl,
+                  });
             liveSwitchSucceeded = true;
 
             if (isTauri) {

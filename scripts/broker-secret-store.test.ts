@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
     deleteBrokerSecretsWithInvoke,
+    freshLoginBrokerWithInvoke,
     loginBrokerWithSavedSecretsWithInvoke,
     saveBrokerSecretsWithInvoke,
     statusBrokerSecretsWithInvoke,
@@ -133,4 +134,58 @@ test('loginBrokerWithSavedSecretsWithInvoke sends only metadata to Tauri', async
     assert.equal(JSON.stringify(calls).includes('password'), false);
     assert.equal(JSON.stringify(calls).includes('apiSecret'), false);
     assert.equal(JSON.stringify(calls).includes('certPass'), false);
+});
+
+test('freshLoginBrokerWithInvoke sends form metadata and secrets to the authed command', async () => {
+    const { calls, invoke } = recorder({
+        ok: true,
+        provider: 'nova',
+        market: 'nova',
+        warning: null,
+        error: null,
+    });
+
+    const result = await freshLoginBrokerWithInvoke(invoke, 'nova', form);
+
+    assert.deepEqual(result, {
+        ok: true,
+        provider: 'nova',
+        market: 'nova',
+        warning: null,
+        error: null,
+    });
+    assert.deepEqual(calls, [
+        {
+            command: 'broker_fresh_login',
+            args: {
+                broker: 'nova',
+                metadata: {
+                    certPath: '/private/certs/nova.p12',
+                    apiUrl: 'https://broker.example.test',
+                },
+                secrets: {
+                    idNo: 'A123456789',
+                    password: 'account-pass',
+                    apiKey: 'api-key',
+                    apiSecret: 'api-secret',
+                    certPass: 'cert-pass',
+                },
+            },
+        },
+    ]);
+});
+
+test('freshLoginBrokerWithInvoke throws when the live login fails', async () => {
+    const { invoke } = recorder({
+        ok: false,
+        provider: null,
+        market: null,
+        warning: null,
+        error: '本機服務身分驗證不符',
+    });
+
+    await assert.rejects(
+        () => freshLoginBrokerWithInvoke(invoke, 'fubon', form),
+        /本機服務身分驗證不符/,
+    );
 });
